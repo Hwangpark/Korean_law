@@ -1,0 +1,11 @@
+{
+  "name": "korean-law-multiagent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "mock:run": "node apps/api/src/cli/run-mock-analysis.mjs",
+    "test": "node scripts/test-pipeline.mjs",
+    "check": "npm run test"
+  }
+}

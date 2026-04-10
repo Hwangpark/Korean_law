@@ -1,0 +1,9 @@
+{
+  "request_id": "sample-messenger-image",
+  "input_type": "image",
+  "context_type": "messenger",
+  "ocr_fixture": "fixtures/ocr/sample-messenger.json",
+  "metadata": {
+    "locale": "ko-KR"
+  }
+}
