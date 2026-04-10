@@ -41,7 +41,39 @@ function buildActions(issueTypes) {
   return actions;
 }
 
-export async function runLegalAnalysisAgent(classificationResult, lawSearchResult, precedentSearchResult) {
+function buildSummary(charges) {
+  return charges.length === 0
+    ? "현재 fixture 기준으로 명확한 법적 쟁점이 충분히 식별되지 않았습니다."
+    : `현재 입력에서는 ${charges.length}건의 주요 법적 쟁점이 탐지되었습니다.`;
+}
+
+function buildIssueCards(charges) {
+  return charges.map((charge) => ({
+    title: charge.charge,
+    basis: charge.basis,
+    probability: charge.probability,
+    expected_penalty: charge.expected_penalty,
+    checklist: charge.elements_met
+  }));
+}
+
+function buildPrecedentCards(precedents) {
+  return precedents.map((precedent) => ({
+    case_no: precedent.case_no,
+    court: precedent.court,
+    verdict: precedent.verdict,
+    summary: precedent.summary,
+    similarity_score: precedent.similarity_score
+  }));
+}
+
+export async function runLegalAnalysisAgent(
+  classificationResult,
+  lawSearchResult,
+  precedentSearchResult,
+  options = {}
+) {
+  const providerMode = options.providerMode ?? "mock";
   const issueTypes = new Set(classificationResult.issues.map((issue) => issue.type));
 
   const charges = classificationResult.issues.map((issue) => {
@@ -64,19 +96,29 @@ export async function runLegalAnalysisAgent(classificationResult, lawSearchResul
     ? 1
     : Math.max(...classificationResult.issues.map((issue) => SEVERITY_TO_RISK[issue.severity] ?? 1));
 
+  const recommendedActions = buildActions(issueTypes);
+  const evidenceToCollect = [
+    "원본 이미지 또는 원문 대화",
+    "게시 시간과 URL 또는 방 정보",
+    "반복성 입증을 위한 추가 캡처",
+    "상대방 식별 가능 정보"
+  ];
+  const disclaimer =
+    "본 분석은 mock 데이터에 기반한 참고용 초안이며 법적 효력이 없습니다. 구체적인 법률 자문은 변호사와 상담해야 합니다.";
+  const summary = buildSummary(charges);
+
   return {
-    mode: "mock",
+    mode: providerMode,
     can_sue: charges.length > 0,
     risk_level: riskLevel,
     charges,
-    recommended_actions: buildActions(issueTypes),
-    evidence_to_collect: [
-      "원본 이미지 또는 원문 대화",
-      "게시 시간과 URL 또는 방 정보",
-      "반복성 입증을 위한 추가 캡처",
-      "상대방 식별 가능 정보"
-    ],
-    disclaimer:
-      "본 분석은 mock 데이터에 기반한 참고용 초안이며 법적 효력이 없습니다. 구체적인 법률 자문은 변호사와 상담해야 합니다."
+    recommended_actions: recommendedActions,
+    evidence_to_collect: evidenceToCollect,
+    disclaimer,
+    summary,
+    issue_cards: buildIssueCards(charges),
+    precedent_cards: buildPrecedentCards(precedentSearchResult.precedents),
+    next_steps: recommendedActions,
+    share_text: `${summary} 자세한 검토 전까지는 원본 증거 보존과 플랫폼 신고 이력을 함께 정리하는 것이 좋습니다.`
   };
 }

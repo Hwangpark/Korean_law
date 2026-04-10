@@ -18,12 +18,12 @@
 - Law Search Agent
 - Precedent Search Agent
 - Legal Analysis Agent
-- Report Generation Agent
 
 ## 현재 스캐폴드 목표
 - 실서비스 이전에 입력과 출력 계약을 고정한다.
 - API 키 없이도 end-to-end mock 실행이 가능해야 한다.
 - 병렬 대상인 Law Search / Precedent Search를 코드 구조에서 분리한다.
+- Legal Analysis Agent가 최종 사용자용 결과 포맷까지 직접 생성한다.
 - 이후 live provider를 붙일 때 agent 인터페이스는 유지하고 내부 provider만 바꾼다.
 
 ## Mock 모드 원칙

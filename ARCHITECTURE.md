@@ -48,9 +48,6 @@
               [Legal Analysis Agent]
                       │
                       ▼
-              [Report Generation Agent]
-                      │
-                      ▼
               [사용자에게 결과 반환]
 ```
 
@@ -63,7 +60,7 @@
 **역할:** 전체 파이프라인 관리 및 에이전트 간 데이터 흐름 조율
 
 **입력:** 사용자 업로드 (이미지 또는 텍스트)  
-**출력:** 최종 분석 결과 (Report Agent 결과물)
+**출력:** 최종 분석 결과 (Legal Analysis Agent 결과물)
 
 **수행 작업:**
 - 입력 타입 판별 (이미지 vs 텍스트)
@@ -227,12 +224,12 @@
 
 ---
 
-### 6. Legal Analysis Agent (법적 판단 에이전트)
+### 6. Legal Analysis Agent (법적 판단 + 결과 포맷 에이전트)
 
-**역할:** 수집된 법령 + 판례를 바탕으로 종합 법적 판단 생성
+**역할:** 수집된 법령 + 판례를 바탕으로 종합 법적 판단 생성 및 사용자용 결과 포맷 반환
 
 **입력:** Classifier + Law Search + Precedent Agent 결과 전체  
-**출력:** 구조화된 법적 분석 결과
+**출력:** 구조화된 법적 분석 결과 + 프론트엔드 렌더링용 데이터
 
 **수행 작업:**
 - 고소 가능 여부 판단 (형사/민사 구분)
@@ -241,11 +238,14 @@
 - 친고죄 여부 → 피해자 고소 필요 여부 안내
 - 증거 수집 권고사항 생성
 - 면책 가능성 (위법성 조각 사유) 검토
+- 비전문가도 이해할 수 있는 요약과 카드형 결과 데이터 생성
 
 **결과 포맷:**
 ```json
 {
+  "summary": "현재 입력에서는 2건의 주요 법적 쟁점이 탐지되었습니다.",
   "can_sue": true,
+  "risk_level": 4,
   "charges": [
     {
       "charge": "사이버 명예훼손",
@@ -260,25 +260,24 @@
     "작성자 IP 추적을 위한 임시처분 신청",
     "경찰서 사이버수사대 고소장 제출"
   ],
+  "issue_cards": [
+    {
+      "title": "사이버 명예훼손",
+      "basis": "정보통신망법 제70조 제1항",
+      "probability": "high"
+    }
+  ],
+  "precedent_cards": [
+    {
+      "case_no": "2023도1234",
+      "court": "대법원",
+      "verdict": "유죄"
+    }
+  ],
+  "next_steps": ["증거 보존", "법률 상담 검토"],
   "disclaimer": "본 분석은 참고용이며 법적 효력이 없습니다..."
 }
 ```
-
----
-
-### 7. Report Generation Agent (보고서 생성 에이전트)
-
-**역할:** 모든 분석 결과를 사용자 친화적 UI 데이터로 변환
-
-**입력:** Legal Analysis Agent 결과 전체  
-**출력:** 프론트엔드 렌더링용 JSON
-
-**수행 작업:**
-- 비법률 전문가도 이해할 수 있는 언어로 변환
-- 위험도 시각화 데이터 생성 (레벨 1~5)
-- 단계별 행동 가이드 생성
-- 면책 문구 및 전문가 상담 안내 포함
-- 공유 가능한 요약 텍스트 생성
 
 ---
 
@@ -304,13 +303,11 @@ Orchestrator
                                                          Legal Analysis Agent
                                                                   │
                                                                   ▼
-                                                        Report Generation Agent
-                                                                  │
-                                                                  ▼
                                                            사용자 결과 화면
 ```
 
-**병렬 실행:** Law Search Agent와 Precedent Search Agent는 동시 실행 가능
+**병렬 실행:** Law Search Agent와 Precedent Search Agent는 동시 실행 가능  
+**최종 구조:** Orchestrator 포함 총 6개 에이전트
 
 ---
 
@@ -357,9 +354,9 @@ POST /api/analyze
 
 GET /api/analyze/:job_id/stream  (SSE)
   Events:
-    - agent_start: { agent: "ocr|classifier|law|precedent|analysis|report" }
+    - agent_start: { agent: "ocr|classifier|law|precedent|analysis" }
     - agent_done:  { agent: "...", result: {...} }
-    - complete:    { report: {...} }
+    - complete:    { analysis: {...} }
     - error:       { message: "..." }
 
 GET /api/analyze/:job_id
@@ -421,6 +418,5 @@ REDIS_URL=                # 작업 큐 및 캐싱
 
 ### Phase 3 — 이미지 지원 + 고도화
 - [ ] OCR Agent (이미지 업로드)
-- [ ] Report Generation Agent
 - [ ] 위험도 시각화
 - [ ] 모바일 최적화

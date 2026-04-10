@@ -3,7 +3,6 @@ import { runLawSearchAgent } from "../agents/law-search-agent.mjs";
 import { runLegalAnalysisAgent } from "../agents/legal-analysis-agent.mjs";
 import { runOcrAgent } from "../agents/ocr-agent.mjs";
 import { runPrecedentSearchAgent } from "../agents/precedent-search-agent.mjs";
-import { runReportGenerationAgent } from "../agents/report-generation-agent.mjs";
 
 async function runStage(timeline, agent, task) {
   const startedAt = new Date().toISOString();
@@ -40,11 +39,7 @@ export async function runAnalysis(request, options = {}) {
   ]);
 
   const legalAnalysis = await runStage(timeline, "analysis", () =>
-    runLegalAnalysisAgent(classification, lawSearch, precedentSearch)
-  );
-
-  const report = await runStage(timeline, "report", () =>
-    runReportGenerationAgent(legalAnalysis, precedentSearch)
+    runLegalAnalysisAgent(classification, lawSearch, precedentSearch, { providerMode })
   );
 
   return {
@@ -59,7 +54,6 @@ export async function runAnalysis(request, options = {}) {
     classification,
     law_search: lawSearch,
     precedent_search: precedentSearch,
-    legal_analysis: legalAnalysis,
-    report
+    legal_analysis: legalAnalysis
   };
 }
