@@ -4,8 +4,32 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "db:up": "docker compose --env-file .env.local up -d postgres",
+    "db:down": "docker compose --env-file .env.local down",
+    "db:logs": "docker compose --env-file .env.local logs -f postgres",
+    "stack:up": "docker compose --env-file .env.local up -d postgres api web db-admin",
+    "stack:down": "docker compose --env-file .env.local down",
+    "stack:logs": "docker compose --env-file .env.local logs -f postgres api web db-admin",
+    "dev:api": "tsx apps/api/src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "web:install": "npm --prefix apps/web install",
+    "dev:web": "npm --prefix apps/web run dev",
+    "web:check": "npm --prefix apps/web run check",
+    "build:web": "npm --prefix apps/web run build",
     "mock:run": "node apps/api/src/cli/run-mock-analysis.mjs",
-    "test": "node scripts/test-pipeline.mjs",
-    "check": "npm run test"
+    "test:mock": "node scripts/test-pipeline.mjs",
+    "test:auth": "tsx scripts/test-auth.ts",
+    "test": "npm run test:mock",
+    "check": "npm run test:mock && npm run typecheck && npm run web:check"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.7.2",
+    "@types/pg": "^8.15.5",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
   }
 }
