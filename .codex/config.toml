@@ -1,0 +1,11 @@
+model = "gpt-5.4"
+model_reasoning_effort = "high"
+project_doc_fallback_filenames = ["ARCHITECTURE.md", "README.md"]
+
+developer_instructions = """
+Treat ARCHITECTURE.md as the source of truth for runtime agent boundaries and phase ordering.
+Prefer mock-first changes until LAW_API_KEY and OPENAI_API_KEY are available.
+Keep legal disclaimers explicit in every user-facing report.
+Preserve privacy protections: masking, short-lived uploads, and abuse prevention hooks.
+When adding live providers later, keep the existing fixture and contract shapes stable.
+"""

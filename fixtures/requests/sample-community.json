@@ -1,0 +1,9 @@
+{
+  "request_id": "sample-community",
+  "input_type": "text",
+  "context_type": "community",
+  "text": "커뮤니티 게시글에서 상대방이 '너 사기꾼인 거 다 퍼뜨리겠다. 네 신상과 전화번호도 올릴 거고 계속 따라다니겠다'고 적었습니다.",
+  "metadata": {
+    "locale": "ko-KR"
+  }
+}

@@ -1,0 +1,79 @@
+[
+  {
+    "topics": ["명예훼손"],
+    "queries": ["명예훼손", "허위사실 적시"],
+    "law_name": "형법",
+    "article_no": "제307조",
+    "article_title": "명예훼손",
+    "content": "공연히 사실 또는 허위사실을 적시하여 사람의 명예를 훼손한 경우를 다룬다.",
+    "penalty": "2년 이하 징역 또는 500만원 이하 벌금",
+    "is_complaint_required": true,
+    "url": "https://www.law.go.kr/"
+  },
+  {
+    "topics": ["명예훼손"],
+    "queries": ["명예훼손", "허위사실 적시"],
+    "law_name": "정보통신망법",
+    "article_no": "제70조",
+    "article_title": "벌칙",
+    "content": "정보통신망을 이용한 명예훼손을 다룬다.",
+    "penalty": "3년 이하 징역 또는 3천만원 이하 벌금",
+    "is_complaint_required": false,
+    "url": "https://www.law.go.kr/"
+  },
+  {
+    "topics": ["협박/공갈"],
+    "queries": ["협박", "공갈"],
+    "law_name": "형법",
+    "article_no": "제283조",
+    "article_title": "협박",
+    "content": "사람을 협박한 경우를 처벌한다.",
+    "penalty": "3년 이하 징역 또는 500만원 이하 벌금",
+    "is_complaint_required": false,
+    "url": "https://www.law.go.kr/"
+  },
+  {
+    "topics": ["모욕"],
+    "queries": ["모욕"],
+    "law_name": "형법",
+    "article_no": "제311조",
+    "article_title": "모욕",
+    "content": "공연히 사람을 모욕한 경우를 다룬다.",
+    "penalty": "1년 이하 징역 또는 200만원 이하 벌금",
+    "is_complaint_required": true,
+    "url": "https://www.law.go.kr/"
+  },
+  {
+    "topics": ["개인정보 유출"],
+    "queries": ["개인정보 유출", "개인정보보호법"],
+    "law_name": "개인정보보호법",
+    "article_no": "제71조",
+    "article_title": "벌칙",
+    "content": "개인정보를 부정하게 제공 또는 유출한 경우를 다룬다.",
+    "penalty": "5년 이하 징역 또는 5천만원 이하 벌금",
+    "is_complaint_required": false,
+    "url": "https://www.law.go.kr/"
+  },
+  {
+    "topics": ["스토킹"],
+    "queries": ["스토킹"],
+    "law_name": "스토킹범죄의 처벌 등에 관한 법률",
+    "article_no": "제18조",
+    "article_title": "벌칙",
+    "content": "지속적 또는 반복적 접근과 연락 등 스토킹 행위를 다룬다.",
+    "penalty": "3년 이하 징역 또는 3천만원 이하 벌금",
+    "is_complaint_required": false,
+    "url": "https://www.law.go.kr/"
+  },
+  {
+    "topics": ["사기"],
+    "queries": ["사기"],
+    "law_name": "형법",
+    "article_no": "제347조",
+    "article_title": "사기",
+    "content": "사람을 기망하여 재물 또는 재산상 이익을 취한 경우를 다룬다.",
+    "penalty": "10년 이하 징역 또는 2천만원 이하 벌금",
+    "is_complaint_required": false,
+    "url": "https://www.law.go.kr/"
+  }
+]
