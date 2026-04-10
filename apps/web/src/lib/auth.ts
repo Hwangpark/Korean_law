@@ -45,7 +45,7 @@ type RawMeResponse = Partial<MeResponse> & {
 export const DEFAULT_AUTH_BASE_URL =
   import.meta.env.VITE_AUTH_BASE_URL ?? 'http://localhost:3001';
 export const PASSWORD_POLICY_HINT =
-  'Use at least 9 characters with English letters, numbers, and a special character.';
+  '9자 이상, 영문, 숫자, 특수문자를 모두 포함해야 합니다.';
 
 const AUTH_BASE_URL_STORAGE_KEY = 'korean-law.auth.base-url';
 const AUTH_TOKEN_STORAGE_KEY = 'korean-law.auth.token';

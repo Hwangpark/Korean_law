@@ -10,7 +10,7 @@ const NUMBER_PATTERN = /\d/;
 const SPECIAL_PATTERN = /[!-/:-@[-`{-~]/;
 
 export const PASSWORD_POLICY_MESSAGE =
-  "Password must be at least 9 characters and include an English letter, a number, and a special character.";
+  "비밀번호는 9자 이상이며 영문, 숫자, 특수문자를 모두 포함해야 합니다.";
 
 export function normalizeEmail(email: unknown): string {
   return String(email ?? "").trim().toLowerCase();

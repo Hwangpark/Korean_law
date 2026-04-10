@@ -44,18 +44,18 @@ function formatTokenPreview(token: string) {
 
 function formatExpiry(seconds: number) {
   if (!seconds) {
-    return 'n/a';
+    return '확인 전';
   }
 
   if (seconds >= 172800) {
-    return `${Math.round(seconds / 86400)} days`;
+    return `${Math.round(seconds / 86400)}일`;
   }
 
   if (seconds >= 3600) {
-    return `${Math.round(seconds / 3600)} hours`;
+    return `${Math.round(seconds / 3600)}시간`;
   }
 
-  return `${seconds}s`;
+  return `${seconds}초`;
 }
 
 function Field({
@@ -139,7 +139,7 @@ export default function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [statusTone, setStatusTone] = useState<StatusTone>('neutral');
   const [statusMessage, setStatusMessage] = useState(
-    'Choose the auth endpoint, then create or reopen an account.',
+    '로그인 또는 회원가입 후 사건 분석 화면으로 이어집니다.',
   );
   const [busy, setBusy] = useState<BusyAction>(null);
 
@@ -148,7 +148,7 @@ export default function App() {
   const endpointDirty = endpointDraft !== authBaseUrl;
   const healthLabel = health
     ? `${health.service} @ ${new Date(health.time).toLocaleTimeString('ko-KR')}`
-    : 'Unchecked';
+    : '미확인';
 
   useEffect(() => {
     const token = storedToken;
@@ -172,7 +172,7 @@ export default function App() {
           tokenType: response.token_type,
         });
         setStatusTone('success');
-        setStatusMessage(`Session ready for ${response.user.email}.`);
+        setStatusMessage(`${response.user.email} 계정으로 세션을 복원했습니다.`);
       })
       .catch((error: unknown) => {
         if (!active) {
@@ -187,7 +187,7 @@ export default function App() {
         setSession(null);
         setStatusTone('danger');
         setStatusMessage(
-          error instanceof Error ? error.message : 'Session restore failed.',
+          error instanceof Error ? error.message : '세션 복원에 실패했습니다.',
         );
       })
       .finally(() => {
@@ -212,17 +212,17 @@ export default function App() {
 
     setBusy('signup');
     setStatusTone('neutral');
-    setStatusMessage('Creating account...');
+    setStatusMessage('회원가입을 처리하고 있습니다...');
 
     try {
       const response = await signup(authBaseUrl, {
         email: signupEmail,
         password: signupPassword,
       });
-      applyAuthResponse(response, 'Account created and signed in.');
+      applyAuthResponse(response, '회원가입이 완료되었고 바로 로그인되었습니다.');
     } catch (error) {
       setStatusTone('danger');
-      setStatusMessage(error instanceof Error ? error.message : 'Signup failed.');
+      setStatusMessage(error instanceof Error ? error.message : '회원가입에 실패했습니다.');
     } finally {
       setBusy(null);
     }
@@ -232,17 +232,17 @@ export default function App() {
     event.preventDefault();
     setBusy('login');
     setStatusTone('neutral');
-    setStatusMessage('Opening session...');
+    setStatusMessage('로그인 중입니다...');
 
     try {
       const response = await login(authBaseUrl, {
         email: loginEmail,
         password: loginPassword,
       });
-      applyAuthResponse(response, 'Session opened.');
+      applyAuthResponse(response, '로그인되었습니다.');
     } catch (error) {
       setStatusTone('danger');
-      setStatusMessage(error instanceof Error ? error.message : 'Login failed.');
+      setStatusMessage(error instanceof Error ? error.message : '로그인에 실패했습니다.');
     } finally {
       setBusy(null);
     }
@@ -251,17 +251,17 @@ export default function App() {
   async function handleHealthCheck() {
     setBusy('health');
     setStatusTone('neutral');
-    setStatusMessage(`Checking ${endpointDraft}...`);
+    setStatusMessage(`${endpointDraft} 상태를 확인하고 있습니다...`);
 
     try {
       const response = await checkHealth(endpointDraft);
       setHealth(response);
       setStatusTone('success');
-      setStatusMessage(`Auth service responded from ${endpointDraft}.`);
+      setStatusMessage(`${endpointDraft} 인증 서버가 정상 응답했습니다.`);
     } catch (error) {
       setStatusTone('danger');
       setStatusMessage(
-        error instanceof Error ? error.message : 'Health check failed.',
+        error instanceof Error ? error.message : '헬스 체크에 실패했습니다.',
       );
     } finally {
       setBusy(null);
@@ -272,13 +272,13 @@ export default function App() {
     const nextToken = session?.token ?? storedToken;
     if (!nextToken) {
       setStatusTone('danger');
-      setStatusMessage('No local token is available for revalidation.');
+      setStatusMessage('재검증할 로컬 세션 토큰이 없습니다.');
       return;
     }
 
     setBusy('restore');
     setStatusTone('neutral');
-    setStatusMessage('Revalidating session...');
+    setStatusMessage('세션을 다시 확인하고 있습니다...');
 
     try {
       const response = await fetchMe(authBaseUrl, nextToken);
@@ -290,7 +290,7 @@ export default function App() {
         tokenType: response.token_type,
       }));
       setStatusTone('success');
-      setStatusMessage(`Session confirmed for ${response.user.email}.`);
+      setStatusMessage(`${response.user.email} 계정 세션이 유효합니다.`);
     } catch (error) {
       if (error instanceof Error && /unauthorized/i.test(error.message)) {
         clearStoredToken();
@@ -298,7 +298,7 @@ export default function App() {
       }
       setSession(null);
       setStatusTone('danger');
-      setStatusMessage(error instanceof Error ? error.message : 'Reconnect failed.');
+      setStatusMessage(error instanceof Error ? error.message : '세션 재확인에 실패했습니다.');
     } finally {
       setBusy(null);
     }
@@ -309,7 +309,7 @@ export default function App() {
     setAuthBaseUrl(saved);
     setAuthBaseUrlInput(saved);
     setStatusTone('success');
-    setStatusMessage(`Saved auth endpoint: ${saved}`);
+    setStatusMessage(`인증 API 주소를 ${saved}로 저장했습니다.`);
   }
 
   function handleResetBaseUrl() {
@@ -317,7 +317,7 @@ export default function App() {
     setAuthBaseUrl(next);
     setAuthBaseUrlInput(next);
     setStatusTone('neutral');
-    setStatusMessage('Auth endpoint reset to the project default.');
+    setStatusMessage('인증 API 주소를 기본값으로 되돌렸습니다.');
   }
 
   function handleLogout() {
@@ -325,14 +325,14 @@ export default function App() {
     setStoredToken(null);
     setSession(null);
     setStatusTone('neutral');
-    setStatusMessage('Local session cleared.');
+    setStatusMessage('로컬 세션을 정리했습니다.');
   }
 
   function copyToken() {
     const token = session?.token ?? storedToken;
     if (!token) {
       setStatusTone('danger');
-      setStatusMessage('No token is available to copy.');
+      setStatusMessage('복사할 토큰이 없습니다.');
       return;
     }
 
@@ -340,11 +340,11 @@ export default function App() {
       .writeText(token)
       .then(() => {
         setStatusTone('success');
-        setStatusMessage('Token copied to clipboard.');
+        setStatusMessage('토큰을 클립보드에 복사했습니다.');
       })
       .catch(() => {
         setStatusTone('danger');
-        setStatusMessage('Copy failed in this browser context.');
+        setStatusMessage('현재 브라우저 환경에서는 복사에 실패했습니다.');
       });
   }
 
@@ -370,11 +370,11 @@ export default function App() {
   const primaryActionLabel =
     authMode === 'signup'
       ? busy === 'signup'
-        ? 'Creating account...'
-        : 'Create account'
+        ? '가입 중...'
+        : '회원가입'
       : busy === 'login'
-        ? 'Opening session...'
-        : 'Open session';
+        ? '로그인 중...'
+        : '로그인';
 
   return (
     <div className="shell">
@@ -383,53 +383,51 @@ export default function App() {
           <div className="brand-line">
             <span className="brand-name">KoreanLaw</span>
             <span className="brand-divider">/</span>
-            <span className="brand-subtitle">identity layer</span>
+            <span className="brand-subtitle">분석 시작</span>
           </div>
           <p className="masthead-note">
-            Email verification lands next. Strong password policy is live now.
+            커뮤니티 글, 게임 채팅, 메신저 캡처를 분석 흐름으로 보내기 전 계정 상태를 먼저 확인합니다.
           </p>
           <div className={`masthead-state masthead-state-${session ? 'live' : 'idle'}`}>
-            {session ? 'Authenticated' : 'Awaiting first sign-in'}
+            {session ? '로그인됨' : '로그인 대기'}
           </div>
         </header>
 
         <section className="hero-grid">
           <section className="hero-copy">
             <p className="section-number">01</p>
-            <p className="eyebrow">Secure intake before legal analysis</p>
-            <h1>Let the right people in before the legal agents touch the case.</h1>
+            <p className="eyebrow">사건 분석 전 사용자 확인</p>
+            <h1>텍스트와 이미지 제보를 법률 분석 흐름으로 안전하게 연결합니다.</h1>
             <p className="lede">
-              This front door handles signup, login, saved-session recovery, and
-              endpoint switching for the KoreanLaw stack. It is deliberately
-              editorial, not a generic card grid, because the first impression of
-              trust should feel intentional.
+              KoreanLaw는 커뮤니티 익명글, 게임 채팅, 메신저 캡처를 받아
+              관련 법령 조회, 판례 비교, 형사·민사 쟁점 판단까지 이어지는
+              구조를 목표로 합니다. 지금 화면은 그 흐름에 들어가기 위한
+              로그인과 세션 확인 단계입니다.
             </p>
 
             <div className="editorial-block">
-              <span className="editorial-label">Operating rule</span>
+              <span className="editorial-label">현재 범위</span>
               <p>
-                User passwords require 9 or more characters, at least one English
-                letter, one number, and one special character. PostgreSQL
-                credentials stay separate and are still managed through the local
-                environment.
+                이메일 인증은 다음 단계에서 붙입니다. 현재는 회원가입, 로그인,
+                세션 복구, 인증 API 상태 확인까지 먼저 안정화한 상태입니다.
               </p>
             </div>
 
             <div className="sequence-list">
               <FlowStep
                 number="01"
-                title="Create a strong account"
-                copy="Sign up with a password that clears the same policy on the client and the API."
+                title="지원 입력"
+                copy="커뮤니티 글, 게임 채팅, 메신저 캡처 이미지를 분석 입력으로 연결할 예정입니다."
               />
               <FlowStep
                 number="02"
-                title="Persist the session locally"
-                copy="The bearer token is stored in the browser so the intake shell can revalidate later."
+                title="분석 파이프라인"
+                copy="OCR, 쟁점 분류, 법령 검색, 판례 검색, 법적 판단 에이전트가 순서대로 이어집니다."
               />
               <FlowStep
                 number="03"
-                title="Hand the case to the agents"
-                copy="Once identity is stable, the next layer can attach intake, OCR, search, and legal analysis."
+                title="사용자 결과"
+                copy="로그인 이후에는 고소 가능성, 관련 조문, 유사 판례, 예상 리스크를 한 화면에서 보여주게 됩니다."
               />
             </div>
           </section>
@@ -437,21 +435,20 @@ export default function App() {
           <aside className="auth-module">
             <div className="module-head">
               <p className="section-number">02</p>
-              <h2>Account access</h2>
+              <h2>계정 확인</h2>
               <p>
-                Set the live auth origin, then choose whether you are creating the
-                first account or reopening an existing session.
+                인증 API 주소를 확인한 뒤 회원가입 또는 로그인으로 바로 진입할 수 있습니다.
               </p>
             </div>
 
             <div className="endpoint-zone">
               <Field
-                label="Auth endpoint"
+                label="인증 API 주소"
                 type="text"
                 placeholder="http://localhost:3001"
                 value={authBaseUrlInput}
                 onChange={setAuthBaseUrlInput}
-                note="Full origin only. Save to make it the active session endpoint."
+                note="로컬 또는 스테이징 인증 서버 주소를 입력하고 저장하세요."
               />
 
               <div className="button-row">
@@ -461,14 +458,14 @@ export default function App() {
                   type="button"
                   disabled={!endpointDirty}
                 >
-                  Save endpoint
+                  주소 저장
                 </button>
                 <button
                   className="button button-ghost"
                   onClick={handleResetBaseUrl}
                   type="button"
                 >
-                  Reset
+                  기본값 복원
                 </button>
                 <button
                   className="button button-ghost"
@@ -476,30 +473,30 @@ export default function App() {
                   type="button"
                   disabled={busy === 'health'}
                 >
-                  {busy === 'health' ? 'Checking...' : 'Check health'}
+                  {busy === 'health' ? '확인 중...' : '헬스 체크'}
                 </button>
               </div>
 
               <div className="telemetry-grid">
                 <div className="telemetry-item">
-                  <span>Saved endpoint</span>
+                  <span>저장된 주소</span>
                   <strong>{authBaseUrl}</strong>
                 </div>
                 <div className="telemetry-item">
-                  <span>Health</span>
+                  <span>상태</span>
                   <strong>{healthLabel}</strong>
                 </div>
               </div>
             </div>
 
-            <div className="auth-switch" aria-label="Choose auth mode">
+            <div className="auth-switch" aria-label="인증 모드 선택">
               <button
                 className={`switch-button ${authMode === 'signup' ? 'switch-button-active' : ''}`}
                 type="button"
                 aria-pressed={authMode === 'signup'}
                 onClick={() => setAuthMode('signup')}
               >
-                Signup
+                회원가입
               </button>
               <button
                 className={`switch-button ${authMode === 'login' ? 'switch-button-active' : ''}`}
@@ -507,7 +504,7 @@ export default function App() {
                 aria-pressed={authMode === 'login'}
                 onClick={() => setAuthMode('login')}
               >
-                Login
+                로그인
               </button>
             </div>
 
@@ -516,7 +513,7 @@ export default function App() {
               onSubmit={authMode === 'signup' ? handleSignup : handleLogin}
             >
               <Field
-                label="Email"
+                label="이메일"
                 type="email"
                 autoComplete="email"
                 placeholder="you@example.com"
@@ -525,13 +522,13 @@ export default function App() {
               />
 
               <Field
-                label="Password"
+                label="비밀번호"
                 type="password"
                 autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
                 placeholder={
                   authMode === 'signup'
-                    ? 'At least 9 chars, plus number and symbol'
-                    : 'Enter your current password'
+                    ? '영문, 숫자, 특수문자 포함 9자 이상'
+                    : '현재 비밀번호를 입력하세요'
                 }
                 value={authMode === 'signup' ? signupPassword : loginPassword}
                 onChange={authMode === 'signup' ? setSignupPassword : setLoginPassword}
@@ -553,16 +550,15 @@ export default function App() {
             </form>
 
             {authMode === 'signup' ? (
-              <div className="policy-grid" aria-label="Password requirements">
-                <PolicyRule label="9 or more characters" passed={signupPolicy.minLength} />
-                <PolicyRule label="Contains an English letter" passed={signupPolicy.hasLetter} />
-                <PolicyRule label="Contains a number" passed={signupPolicy.hasNumber} />
-                <PolicyRule label="Contains a special character" passed={signupPolicy.hasSpecial} />
+              <div className="policy-grid" aria-label="비밀번호 요구사항">
+                <PolicyRule label="9자 이상" passed={signupPolicy.minLength} />
+                <PolicyRule label="영문 포함" passed={signupPolicy.hasLetter} />
+                <PolicyRule label="숫자 포함" passed={signupPolicy.hasNumber} />
+                <PolicyRule label="특수문자 포함" passed={signupPolicy.hasSpecial} />
               </div>
             ) : (
               <p className="micro-note">
-                Existing accounts can log in immediately. Email verification will
-                be inserted after the current identity layer stabilizes.
+                이메일 인증은 다음 단계에서 추가할 예정이며, 현재는 기존 계정으로 바로 로그인할 수 있습니다.
               </p>
             )}
 
@@ -574,16 +570,16 @@ export default function App() {
 
         <section className="signal-band">
           <div className="signal-item">
-            <span>03 / Design stance</span>
-            <strong>No duplicated auth cards. Typography carries the hierarchy.</strong>
+            <span>입력 범위</span>
+            <strong>커뮤니티 글, 게임 채팅, 메신저 캡처를 분석 대상으로 준비 중입니다.</strong>
           </div>
           <div className="signal-item">
-            <span>Runtime</span>
-            <strong>React + TypeScript UI, token auth API, Dockerized Postgres.</strong>
+            <span>예상 출력</span>
+            <strong>관련 법령, 유사 판례, 형사·민사 쟁점, 대응 포인트를 단계별로 안내합니다.</strong>
           </div>
           <div className="signal-item">
-            <span>Next layer</span>
-            <strong>Attach email verification without rebuilding the entry flow.</strong>
+            <span>현재 상태</span>
+            <strong>React + TypeScript UI, 인증 API, Docker PostgreSQL이 연결된 진입 화면입니다.</strong>
           </div>
         </section>
 
@@ -592,47 +588,45 @@ export default function App() {
             <div className="panel-head">
               <div>
                 <p className="section-number">03</p>
-                <h2>Session ledger</h2>
+                <h2>세션 상태</h2>
               </div>
               <p>
-                Tokens stay local to the browser. Revalidate when the saved
-                endpoint changes or when you want to confirm the account is still
-                active.
+                로그인 후 세션 토큰은 브라우저에 저장됩니다. 인증 주소를 바꾸거나,
+                현재 계정 상태를 다시 확인하고 싶을 때 재검증할 수 있습니다.
               </p>
             </div>
 
             {session ? (
               <div className="session-grid">
                 <div className="session-item">
-                  <span>Signed in as</span>
+                  <span>로그인 계정</span>
                   <strong>{session.user.email}</strong>
                 </div>
                 <div className="session-item">
-                  <span>User ID</span>
+                  <span>사용자 ID</span>
                   <strong>{session.user.id}</strong>
                 </div>
                 <div className="session-item">
-                  <span>Token type</span>
+                  <span>토큰 타입</span>
                   <strong>{session.tokenType}</strong>
                 </div>
                 <div className="session-item">
-                  <span>Issued at</span>
+                  <span>발급 시각</span>
                   <strong>{new Date(session.issuedAt).toLocaleString('ko-KR')}</strong>
                 </div>
                 <div className="session-item">
-                  <span>Expires in</span>
+                  <span>만료까지</span>
                   <strong>{formatExpiry(session.expiresIn)}</strong>
                 </div>
                 <div className="session-item session-item-token">
-                  <span>Token preview</span>
+                  <span>토큰 미리보기</span>
                   <strong>{formatTokenPreview(session.token)}</strong>
                 </div>
               </div>
             ) : (
               <p className="empty-state">
-                No authenticated session is loaded yet. Create an account or log
-                in first, then this ledger becomes the technical handoff to the
-                multi-agent pipeline.
+                아직 로그인된 세션이 없습니다. 회원가입 또는 로그인 후 사건 접수
+                화면으로 넘어갈 수 있도록 이 단계에서 먼저 인증 상태를 확인합니다.
               </p>
             )}
 
@@ -641,9 +635,9 @@ export default function App() {
                 className="button button-ghost"
                 onClick={handleReconnect}
                 type="button"
-                disabled={busy === 'restore' || !loadStoredToken()}
+                disabled={busy === 'restore' || !storedToken}
               >
-                  {busy === 'restore' ? 'Revalidating...' : 'Revalidate session'}
+                  {busy === 'restore' ? '재확인 중...' : '세션 재확인'}
               </button>
               <button
                 className="button button-ghost"
@@ -651,7 +645,7 @@ export default function App() {
                 type="button"
                 disabled={!storedToken}
               >
-                Copy token
+                토큰 복사
               </button>
               <button
                 className="button button-ghost"
@@ -659,7 +653,7 @@ export default function App() {
                 type="button"
                 disabled={!storedToken}
               >
-                Clear session
+                세션 정리
               </button>
             </div>
           </section>
@@ -668,31 +662,30 @@ export default function App() {
             <div className="panel-head">
               <div>
                 <p className="section-number">04</p>
-                <h2>What this layer guarantees</h2>
+                <h2>로그인 후 이어질 분석 흐름</h2>
               </div>
               <p>
-                The auth surface is now aligned across client hints, API
-                enforcement, and smoke tests so the next product pass can focus on
-                intake and case orchestration.
+                인증이 끝나면 다음 단계에서는 사건 입력과 멀티에이전트 분석 화면이
+                이 구조 위에 연결됩니다.
               </p>
             </div>
 
             <div className="protocol-list">
               <div className="protocol-item">
                 <span>01</span>
-                <p>One password rule across the frontend, backend, and automated checks.</p>
+                <p>이미지 업로드 또는 텍스트 입력을 받아 OCR과 전처리 단계를 시작합니다.</p>
               </div>
               <div className="protocol-item">
                 <span>02</span>
-                <p>Saved endpoint control for local stacks, Docker ports, and future staging APIs.</p>
+                <p>쟁점 분류 에이전트가 명예훼손, 모욕, 협박, 사기 등 법적 이슈를 추출합니다.</p>
               </div>
               <div className="protocol-item">
                 <span>03</span>
-                <p>A calmer, more intentional landing page that does not collapse into a default SaaS shell.</p>
+                <p>법령 검색과 판례 검색이 병렬로 돌고, 관련 조문과 유사 사건을 모읍니다.</p>
               </div>
               <div className="protocol-item">
                 <span>04</span>
-                <p>Email verification is intentionally deferred, not ignored, so the current auth flow stays replaceable.</p>
+                <p>최종 법적 판단 에이전트가 고소 가능성, 리스크, 대응 포인트를 사용자용으로 정리합니다.</p>
               </div>
             </div>
           </section>
