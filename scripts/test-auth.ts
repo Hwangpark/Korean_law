@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:3001";
-const DEFAULT_PASSWORD = "park8948";
+const DEFAULT_PASSWORD = "Park8948!";
 
 const REGISTER_PATHS = splitCsv(
   process.env.AUTH_REGISTER_PATHS ??

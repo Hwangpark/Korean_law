@@ -48,7 +48,8 @@ npm run dev:web
 
 로컬 비밀값:
 - 실제 로컬 DB 비밀번호는 `.env.local`에만 저장
-- 현재 로컬 개발 비밀번호는 사용자가 지정한 `park8948`
+- 현재 로컬 PostgreSQL 비밀번호는 사용자가 지정한 `park8948`
+- 사용자 회원가입 비밀번호는 `9자 이상 + 영문 + 숫자 + 특수문자` 규칙을 따른다. 예시: `Park8948!`
 
 기본 fixture:
 - [fixtures/requests/sample-community.json](/Users/minsu/Desktop/KoreanLaw/fixtures/requests/sample-community.json)

@@ -8,7 +8,8 @@
 
 - 사용자별 로그인을 전제로 세션 또는 토큰 기반 인증을 붙인다.
 - 데이터 저장소는 Docker의 PostgreSQL을 사용한다.
-- 로컬에서는 비밀번호 `park8948`을 사용한다.
+- 로컬 PostgreSQL 비밀번호는 `park8948`을 사용한다.
+- 사용자 회원가입 비밀번호는 `9자 이상 + 영문 + 숫자 + 특수문자` 조합을 강제한다.
 - auth 스모크 테스트는 실행 중인 로컬 서버의 register/login 엔드포인트를 실제로 호출한다.
 - React 프론트는 `apps/web`에서 `/auth/signup`, `/auth/login`, `/auth/me`와 직접 통신한다.
 
@@ -55,7 +56,7 @@ POSTGRES_PORT=5433 npm run stack:up
 ```json
 {
   "email": "user@example.test",
-  "password": "park8948",
+  "password": "Park8948!",
   "name": "Test User"
 }
 ```
@@ -87,7 +88,7 @@ POSTGRES_PORT=5433 npm run stack:up
 기본값은 다음과 같다.
 
 - `AUTH_BASE_URL=http://127.0.0.1:3001`
-- `AUTH_PASSWORD=park8948`
+- `AUTH_PASSWORD=Park8948!`
 - `AUTH_REGISTER_PATHS=/api/auth/register,/api/register,/auth/register,/api/auth/signup,/auth/signup`
 - `AUTH_LOGIN_PATHS=/api/auth/login,/api/login,/auth/login,/api/auth/signin`
 
@@ -110,6 +111,6 @@ npm run test:auth
 
 ## 주의점
 
-- 이 문서의 `park8948`은 로컬 개발 전용이다.
+- 이 문서의 `park8948`은 PostgreSQL 로컬 개발 전용이다.
 - 공유 환경이나 운영 환경에서는 반드시 다른 비밀번호와 비밀 관리 체계를 써야 한다.
 - CSRF 보호가 강하게 걸린 form 기반 auth라면, smoke test를 그 계약에 맞게 한 단계 더 맞춰야 한다.

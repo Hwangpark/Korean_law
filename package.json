@@ -19,8 +19,9 @@
     "mock:run": "node apps/api/src/cli/run-mock-analysis.mjs",
     "test:mock": "node scripts/test-pipeline.mjs",
     "test:auth": "tsx scripts/test-auth.ts",
+    "test:policy": "tsx scripts/test-password-policy.ts",
     "test": "npm run test:mock",
-    "check": "npm run test:mock && npm run typecheck && npm run web:check"
+    "check": "npm run test:mock && npm run test:policy && npm run typecheck && npm run web:check"
   },
   "dependencies": {
     "dotenv": "^17.2.3",

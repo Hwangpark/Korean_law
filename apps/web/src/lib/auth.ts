@@ -23,6 +23,14 @@ export type HealthResponse = {
   time: string;
 };
 
+export type PasswordPolicyState = {
+  minLength: boolean;
+  hasLetter: boolean;
+  hasNumber: boolean;
+  hasSpecial: boolean;
+  valid: boolean;
+};
+
 type RawAuthResponse = Partial<AuthResponse> & {
   accessToken?: string;
   tokenType?: string;
@@ -36,9 +44,14 @@ type RawMeResponse = Partial<MeResponse> & {
 
 export const DEFAULT_AUTH_BASE_URL =
   import.meta.env.VITE_AUTH_BASE_URL ?? 'http://localhost:3001';
+export const PASSWORD_POLICY_HINT =
+  'Use at least 9 characters with English letters, numbers, and a special character.';
 
 const AUTH_BASE_URL_STORAGE_KEY = 'korean-law.auth.base-url';
 const AUTH_TOKEN_STORAGE_KEY = 'korean-law.auth.token';
+const LETTER_PATTERN = /[A-Za-z]/;
+const NUMBER_PATTERN = /\d/;
+const SPECIAL_PATTERN = /[!-/:-@[-`{-~]/;
 
 function normalizeBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, '');
@@ -85,6 +98,21 @@ export function clearStoredToken() {
   } catch {
     // Ignore storage failures in privacy-restricted browsers.
   }
+}
+
+export function evaluatePasswordPolicy(password: string): PasswordPolicyState {
+  const minLength = password.length >= 9;
+  const hasLetter = LETTER_PATTERN.test(password);
+  const hasNumber = NUMBER_PATTERN.test(password);
+  const hasSpecial = SPECIAL_PATTERN.test(password);
+
+  return {
+    minLength,
+    hasLetter,
+    hasNumber,
+    hasSpecial,
+    valid: minLength && hasLetter && hasNumber && hasSpecial,
+  };
 }
 
 function extractErrorMessage(payload: unknown, fallback: string) {

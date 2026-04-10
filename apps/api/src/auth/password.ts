@@ -4,6 +4,13 @@ const KEY_LENGTH = 32;
 const SALT_LENGTH = 16;
 const ITERATIONS = 210_000;
 const DIGEST = "sha256";
+const MIN_PASSWORD_LENGTH = 9;
+const LETTER_PATTERN = /[A-Za-z]/;
+const NUMBER_PATTERN = /\d/;
+const SPECIAL_PATTERN = /[!-/:-@[-`{-~]/;
+
+export const PASSWORD_POLICY_MESSAGE =
+  "Password must be at least 9 characters and include an English letter, a number, and a special character.";
 
 export function normalizeEmail(email: unknown): string {
   return String(email ?? "").trim().toLowerCase();
@@ -11,8 +18,13 @@ export function normalizeEmail(email: unknown): string {
 
 export function passwordPolicy(password: unknown): string | null {
   const value = String(password ?? "");
-  if (value.length < 8) {
-    return "Password must be at least 8 characters long.";
+  if (
+    value.length < MIN_PASSWORD_LENGTH ||
+    !LETTER_PATTERN.test(value) ||
+    !NUMBER_PATTERN.test(value) ||
+    !SPECIAL_PATTERN.test(value)
+  ) {
+    return PASSWORD_POLICY_MESSAGE;
   }
   return null;
 }
