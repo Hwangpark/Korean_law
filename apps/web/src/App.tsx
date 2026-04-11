@@ -1,58 +1,38 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
-
-import {
-  analyzeCase,
-  DEFAULT_AUTH_BASE_URL,
-  PASSWORD_POLICY_HINT,
-  checkHealth,
-  clearStoredToken,
-  evaluatePasswordPolicy,
-  fetchHistory,
-  fetchMe,
-  getInitialAuthBaseUrl,
-  loadStoredToken,
-  login,
-  saveAuthBaseUrl,
-  saveStoredToken,
-  signup,
-  type AnalysisHistoryItem,
-  type AuthResponse,
-  type AuthUser,
-  type HealthResponse,
-} from './lib/auth';
+import { useEffect, useState, type FormEvent } from 'react';
 
 import './styles.css';
+import {
+  DEFAULT_AUTH_BASE_URL,
+  PASSWORD_POLICY_HINT,
+  analyzeCase,
+  clearStoredToken,
+  evaluatePasswordPolicy,
+  fetchMe,
+  getInitialAuthBaseUrl,
+  getInitialGuestSession,
+  loadStoredToken,
+  login,
+  saveGuestSession,
+  saveStoredToken,
+  signup,
+  type AuthResponse,
+  type AuthUser,
+  type GuestSession,
+} from './lib/auth';
 
-const DEFAULT_ANALYSIS_BASE_URL = import.meta.env.VITE_ANALYSIS_BASE_URL ?? DEFAULT_AUTH_BASE_URL;
+const AUTH_BASE_URL = getInitialAuthBaseUrl();
+const ANALYSIS_BASE_URL = import.meta.env.VITE_ANALYSIS_BASE_URL ?? AUTH_BASE_URL ?? DEFAULT_AUTH_BASE_URL;
 
-type AuthMode = 'signup' | 'login';
-type InputMode = 'text' | 'image' | 'link';
 type ContextType = 'community' | 'game_chat' | 'messenger' | 'other';
-type StatusTone = 'neutral' | 'success' | 'danger';
-type BusyAction = 'signup' | 'login' | 'health' | 'restore' | 'analyze' | null;
-type PipelineStage = 'orchestrator' | 'ocr' | 'classifier' | 'law' | 'precedent' | 'analysis';
+type View = 'input' | 'analyzing' | 'results';
+type AuthMode = 'login' | 'signup';
 
-type SessionState = {
-  user: AuthUser;
-  token: string;
-  issuedAt: string;
-  expiresIn: number;
-  tokenType: string;
-};
-
-type DraftImage = {
-  name: string;
-  size: number;
-  type: string;
-  preview: string;
-};
-
-type IssueCard = {
-  title: string;
+type Charge = {
+  charge: string;
   basis: string;
+  elements_met: string[];
   probability: 'high' | 'medium' | 'low';
   expected_penalty: string;
-  checklist: string[];
 };
 
 type PrecedentCard = {
@@ -63,515 +43,106 @@ type PrecedentCard = {
   similarity_score: number;
 };
 
-type TimelineEvent = {
-  type: string;
-  agent: PipelineStage | string;
-  at: string;
-  duration_ms?: number;
-};
-
-type AnalysisMeta = {
-  provider_mode?: string;
-  generated_at?: string;
-  input_type?: string;
-  context_type?: string;
-};
-
 type AnalysisResult = {
-  canSue: boolean;
-  riskLevel: number;
+  can_sue: boolean;
+  risk_level: number;
   summary: string;
-  issueCards: IssueCard[];
-  recommendedActions: string[];
-  evidenceToCollect: string[];
-  precedentCards: PrecedentCard[];
+  charges: Charge[];
+  recommended_actions: string[];
+  evidence_to_collect: string[];
+  precedent_cards: PrecedentCard[];
   disclaimer: string;
-  meta?: AnalysisMeta;
-  timeline: TimelineEvent[];
-  sourceLabel: string;
 };
 
-type DraftCase = {
-  title: string;
+type AnalyzeResponse = {
+  legal_analysis?: AnalysisResult;
+  guest_id?: string;
+  guest_remaining?: number;
+  meta?: {
+    guest_id?: string;
+    guest_remaining?: number;
+  };
+};
+
+type PendingAnalysis = {
+  text: string;
   contextType: ContextType;
-  mode: InputMode;
-  bodyText: string;
-  linkUrl: string;
-  image: DraftImage | null;
 };
 
-const CONTEXT_OPTIONS: Array<{
-  value: ContextType;
-  label: string;
-  subtitle: string;
-}> = [
-  { value: 'community', label: '커뮤니티', subtitle: '게시글, 댓글, 캡처' },
-  { value: 'game_chat', label: '게임 채팅', subtitle: '인게임 대화, 신고 메모' },
-  { value: 'messenger', label: '메신저', subtitle: '카카오톡, DM, 단체방' },
-  { value: 'other', label: '기타', subtitle: '링크, 메일, 문서' },
+const CONTEXT_OPTIONS: { value: ContextType; label: string; icon: string; desc: string }[] = [
+  { value: 'community', label: '커뮤니티', icon: '📋', desc: '인터넷 게시글·댓글' },
+  { value: 'game_chat', label: '게임 채팅', icon: '🎮', desc: '인게임 채팅·메시지' },
+  { value: 'messenger', label: '메신저', icon: '💬', desc: '카카오톡·라인 등' },
+  { value: 'other', label: '기타', icon: '📄', desc: '그 외 온라인 대화' },
 ];
 
-const INPUT_MODES: Array<{
-  value: InputMode;
-  label: string;
-  subtitle: string;
-}> = [
-  { value: 'text', label: '텍스트', subtitle: '복사한 원문을 넣습니다' },
-  { value: 'image', label: '이미지', subtitle: '캡처 업로드 + OCR 메모' },
-  { value: 'link', label: '링크', subtitle: 'URL 입력 + 크롤링 메모' },
+const AGENT_STEPS = [
+  { id: 'ocr', label: '텍스트 추출', desc: '입력 내용을 파싱합니다' },
+  { id: 'classifier', label: '법적 쟁점 분류', desc: '위법 행위 유형을 식별합니다' },
+  { id: 'law', label: '법령 검색', desc: '관련 조문을 조회합니다' },
+  { id: 'precedent', label: '판례 검색', desc: '유사 사건을 찾습니다' },
+  { id: 'analysis', label: '종합 분석', desc: '법적 판단을 생성합니다' },
 ];
 
-const PIPELINE_STAGES: Array<{
-  id: PipelineStage;
-  label: string;
-  subtitle: string;
-}> = [
-  { id: 'orchestrator', label: 'Orchestrator', subtitle: '사건 파일을 분해하고 흐름을 조율' },
-  { id: 'ocr', label: 'OCR Agent', subtitle: '텍스트, 이미지, 링크의 입력을 정제' },
-  { id: 'classifier', label: 'Classifier Agent', subtitle: '법적 쟁점과 유형을 분류' },
-  { id: 'law', label: 'Law Search Agent', subtitle: '관련 법령과 조문을 검색' },
-  { id: 'precedent', label: 'Precedent Agent', subtitle: '유사 판례와 판단 경향을 검색' },
-  { id: 'analysis', label: 'Legal Analysis Agent', subtitle: '고소 가능성, 증거, 대응을 정리' },
-];
-
-const SAMPLE_TEXT = [
-  '너는 사기꾼이라고 게시글에 올리고 다 퍼뜨리겠다.',
-  '대화 상대가 여러 사람 앞에서 반복적으로 모욕적인 표현을 했고,',
-  '전화번호와 얼굴 사진을 함께 올리겠다고 협박했다.',
-].join(' ');
-
-const SAMPLE_LINK = 'https://example.com/post/12345';
-
-const FALLBACK_RULES = [
-  {
-    title: '사기',
-    basis: '형법 제347조',
-    penalty: '10년 이하의 징역 또는 2천만원 이하의 벌금',
-    keywords: ['사기', '기망', '송금', '환불', '돈', '거짓'],
-    checklist: ['기망 표현 보존', '송금/거래 흐름 정리', '피해 금액 산정'],
-  },
-  {
-    title: '명예훼손',
-    basis: '형법 제307조 / 정보통신망법 제70조',
-    penalty: '사안에 따라 벌금형 또는 징역형',
-    keywords: ['명예훼손', '허위', '퍼뜨리', '유포', '게시글', '루머'],
-    checklist: ['공연성 확인', '사실 적시 여부 확인', '게시 범위 캡처'],
-  },
-  {
-    title: '협박/공갈',
-    basis: '형법 제283조 / 제350조',
-    penalty: '3년 이하의 징역부터 중형 가능',
-    keywords: ['협박', '위협', '공갈', '안 하면', '가만두지', '퍼뜨리'],
-    checklist: ['위협 문장 원문 확보', '도달 경로 기록', '반복성 확인'],
-  },
-  {
-    title: '모욕',
-    basis: '형법 제311조',
-    penalty: '1년 이하의 징역 또는 벌금형',
-    keywords: ['모욕', '욕', '병신', '쓰레기', '멍청'],
-    checklist: ['공연성 확인', '특정성 확인', '발언 전후 맥락 보존'],
-  },
-  {
-    title: '스토킹',
-    basis: '스토킹처벌법',
-    penalty: '반복 연락·접근에 따라 처벌 가능',
-    keywords: ['스토킹', '계속 연락', '찾아가', '반복', '집 앞'],
-    checklist: ['반복성 캡처', '접근 경로 정리', '차단 이력 정리'],
-  },
-  {
-    title: '개인정보 유출',
-    basis: '개인정보보호법',
-    penalty: '고의 유출 여부와 범위에 따라 판단',
-    keywords: ['전화번호', '주소', '주민번호', '신상', '개인정보', '사진'],
-    checklist: ['노출 항목 목록화', '원본/재업로드 경로 확인', '동의 여부 확인'],
-  },
-] as const;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object';
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-function normalizeBaseUrlDraft(value: string) {
-  return value.trim().replace(/\/+$/, '');
-}
-
-function formatBytes(bytes: number) {
-  if (!Number.isFinite(bytes) || bytes <= 0) {
-    return '0 B';
-  }
-
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatTokenPreview(token: string) {
-  if (token.length <= 18) {
-    return token;
-  }
-
-  return `${token.slice(0, 12)}…${token.slice(-10)}`;
-}
-
-function formatIssuedAt(value: string) {
-  try {
-    return new Date(value).toLocaleString('ko-KR');
-  } catch {
-    return value;
-  }
-}
-
-function formatSimilarity(score: number) {
-  return `${Math.round(Math.max(0, Math.min(1, score)) * 100)}%`;
-}
-
-function formatSourceLabel(mode: InputMode) {
-  switch (mode) {
-    case 'image':
-      return '이미지 입력';
-    case 'link':
-      return '링크 입력';
-    default:
-      return '텍스트 입력';
-  }
-}
-
-function formatContextLabel(contextType: ContextType) {
-  const option = CONTEXT_OPTIONS.find((item) => item.value === contextType);
-  return option ? option.label : '기타';
-}
-
-function toStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.flatMap((entry) => (typeof entry === 'string' ? [entry] : []));
-}
-
-function normalizeProbability(value: unknown): IssueCard['probability'] {
-  return value === 'high' || value === 'medium' || value === 'low' ? value : 'low';
-}
-
-function normalizeIssueCards(value: unknown): IssueCard[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.flatMap((entry) => {
-    if (!isRecord(entry)) {
-      return [];
-    }
-
-    const checklist = toStringArray(entry.checklist ?? entry.elements_met);
-    const title = String(entry.title ?? entry.charge ?? '추가 검토 필요');
-    const basis = String(entry.basis ?? '근거 확인 필요');
-    const expectedPenalty = String(entry.expected_penalty ?? '추가 검토 필요');
-
-    return [
-      {
-        title,
-        basis,
-        probability: normalizeProbability(entry.probability),
-        expected_penalty: expectedPenalty,
-        checklist,
-      },
-    ];
-  });
-}
-
-function normalizePrecedentCards(value: unknown): PrecedentCard[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.flatMap((entry) => {
-    if (!isRecord(entry)) {
-      return [];
-    }
-
-    return [
-      {
-        case_no: String(entry.case_no ?? entry.caseNo ?? '예시 사건'),
-        court: String(entry.court ?? '법원 미상'),
-        verdict: String(entry.verdict ?? '결과 요약 필요'),
-        summary: String(entry.summary ?? '유사한 사건 요약이 표시됩니다.'),
-        similarity_score: Number(entry.similarity_score ?? entry.similarityScore ?? 0),
-      },
-    ];
-  });
-}
-
-function normalizeTimeline(value: unknown): TimelineEvent[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.flatMap((entry) => {
-    if (!isRecord(entry)) {
-      return [];
-    }
-
-    return [
-      {
-        type: String(entry.type ?? 'event'),
-        agent: String(entry.agent ?? 'unknown'),
-        at: String(entry.at ?? ''),
-        duration_ms: typeof entry.duration_ms === 'number' ? entry.duration_ms : undefined,
-      },
-    ];
-  });
-}
-
-function createIssueCards(draft: DraftCase): IssueCard[] {
-  const text = `${draft.title}\n${draft.bodyText}\n${draft.linkUrl}\n${draft.image?.name ?? ''}`.toLowerCase();
-
-  const matched = FALLBACK_RULES.flatMap((rule) => {
-    const score = rule.keywords.reduce((count, keyword) => count + (text.includes(keyword.toLowerCase()) ? 1 : 0), 0);
-    if (score === 0) {
-      return [];
-    }
-
-    const probability: IssueCard['probability'] = score >= 3 ? 'high' : score >= 2 ? 'medium' : 'low';
-
-    return [
-      {
-        title: rule.title,
-        basis: rule.basis,
-        probability,
-        expected_penalty: rule.penalty,
-        checklist: [...rule.checklist],
-      },
-    ];
-  });
-
-  if (matched.length > 0) {
-    return matched.slice(0, 3);
-  }
-
-  return [
-    {
-      title: '추가 사실관계 확인',
-      basis: '발언 주체, 공개 범위, 반복성 확인',
-      probability: 'low',
-      expected_penalty: '원본 보존 후 세부 검토 필요',
-      checklist: ['원본 증거 보존', '전후 맥락 확보', '상대방 식별 단서 정리'],
-    },
+function RiskBadge({ level }: { level: number }) {
+  const configs = [
+    { color: 'risk-1', label: '위험 낮음' },
+    { color: 'risk-2', label: '주의 필요' },
+    { color: 'risk-3', label: '위험 보통' },
+    { color: 'risk-4', label: '위험 높음' },
+    { color: 'risk-5', label: '매우 위험' },
   ];
-}
-
-function createPrecedentCards(draft: DraftCase, issueCards: IssueCard[]): PrecedentCard[] {
-  const baseScore = Math.min(0.92, 0.34 + issueCards.length * 0.18 + (draft.mode === 'image' ? 0.08 : 0));
-
-  return [
-    {
-      case_no: '샘플 2024-01',
-      court: '지방법원',
-      verdict: '유사 쟁점 참고',
-      summary: '캡처와 대화 맥락을 함께 제출하면 표현의 공개성 판단이 선명해집니다.',
-      similarity_score: Number(baseScore.toFixed(2)),
-    },
-    {
-      case_no: '샘플 2023-17',
-      court: '고등법원',
-      verdict: '증거 보강 필요',
-      summary: '반복성, 게시 범위, 상대방 식별 가능성이 핵심 판단 요소로 정리됩니다.',
-      similarity_score: Number(Math.max(0.18, baseScore - 0.12).toFixed(2)),
-    },
-  ];
-}
-
-function createRecommendedActions(draft: DraftCase, issueCards: IssueCard[]) {
-  const actions = [
-    '원본 캡처와 화면 URL, 작성 시각이 보이도록 보관하세요.',
-    '게시/대화 흐름 전후를 같이 남겨 공연성과 반복성을 정리하세요.',
-    '상대방 식별 가능 정보와 피해 경위를 한 문단으로 요약하세요.',
-  ];
-
-  if (draft.mode === 'image') {
-    actions.push('이미지 파일의 원본 메타데이터와 업로드 경로를 함께 저장하세요.');
-  }
-
-  if (draft.mode === 'link') {
-    actions.push('링크 페이지 전체와 하위 스레드까지 같이 보존하세요.');
-  }
-
-  if (issueCards.some((item) => item.title.includes('스토킹') || item.title.includes('협박'))) {
-    actions.push('반복 연락과 접근 차단 이력, 신고 기록을 먼저 묶어두세요.');
-  }
-
-  return actions;
-}
-
-function createEvidenceList(draft: DraftCase) {
-  const evidence = [
-    '원본 캡처 또는 원문 대화',
-    '게시 시간, URL, 방 번호, 프로필 정보',
-    '전후 대화 흐름과 반복성 증빙',
-  ];
-
-  if (draft.mode === 'image') {
-    evidence.push('이미지 원본 파일과 파일명');
-  }
-
-  if (draft.mode === 'link') {
-    evidence.push('링크 페이지 전체 캡처와 작성자 정보');
-  }
-
-  return evidence;
-}
-
-function createFallbackAnalysis(draft: DraftCase): AnalysisResult {
-  const issueCards = createIssueCards(draft);
-  const precedentCards = createPrecedentCards(draft, issueCards);
-  const riskLevel = Math.max(1, Math.min(5, issueCards.length + (draft.mode === 'image' ? 1 : 0) + (draft.contextType === 'messenger' ? 1 : 0)));
-
-  return {
-    canSue: riskLevel >= 3,
-    riskLevel,
-    summary:
-      issueCards.length > 0
-        ? `${issueCards.length}개의 주요 쟁점이 탐지되었습니다.`
-        : '명확한 쟁점이 적어서 사실관계 보강이 필요합니다.',
-    issueCards,
-    recommendedActions: createRecommendedActions(draft, issueCards),
-    evidenceToCollect: createEvidenceList(draft),
-    precedentCards,
-    disclaimer: '이 결과는 UI 초안에서 생성한 참고용 분석이며 법적 효력이 없습니다.',
-    meta: {
-      provider_mode: 'local',
-      generated_at: new Date().toISOString(),
-      input_type: draft.mode,
-      context_type: draft.contextType,
-    },
-    timeline: [],
-    sourceLabel: formatSourceLabel(draft.mode),
-  };
-}
-
-function normalizeAnalysisResponse(payload: unknown, draft: DraftCase): AnalysisResult {
-  if (!isRecord(payload)) {
-    return createFallbackAnalysis(draft);
-  }
-
-  const root = payload as Record<string, unknown>;
-  const analysis = isRecord(root.legal_analysis)
-    ? (root.legal_analysis as Record<string, unknown>)
-    : isRecord(root.analysis)
-      ? (root.analysis as Record<string, unknown>)
-      : root;
-
-  const issueCards = normalizeIssueCards(analysis.issue_cards ?? analysis.charges);
-  const precedentCards = normalizePrecedentCards(analysis.precedent_cards);
-  const meta = isRecord(root.meta)
-    ? {
-        provider_mode: typeof root.meta.provider_mode === 'string' ? root.meta.provider_mode : undefined,
-        generated_at: typeof root.meta.generated_at === 'string' ? root.meta.generated_at : undefined,
-        input_type: typeof root.meta.input_type === 'string' ? root.meta.input_type : undefined,
-        context_type: typeof root.meta.context_type === 'string' ? root.meta.context_type : undefined,
-      }
-    : undefined;
-
-  return {
-    canSue: Boolean(analysis.can_sue ?? analysis.canSue ?? issueCards.length > 0),
-    riskLevel: Number(analysis.risk_level ?? analysis.riskLevel ?? Math.max(1, issueCards.length)),
-    summary: String(analysis.summary ?? analysis.headline ?? '분석 결과'),
-    issueCards,
-    recommendedActions: toStringArray(analysis.recommended_actions ?? analysis.next_steps),
-    evidenceToCollect: toStringArray(analysis.evidence_to_collect ?? analysis.evidenceToCollect),
-    precedentCards,
-    disclaimer: String(analysis.disclaimer ?? '법률 자문이 아닌 참고용 안내입니다.'),
-    meta,
-    timeline: normalizeTimeline(root.timeline),
-    sourceLabel: formatSourceLabel(draft.mode),
-  };
-}
-
-function ModeButton({
-  active,
-  label,
-  subtitle,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  subtitle: string;
-  onClick: () => void;
-}) {
+  const cfg = configs[(level ?? 1) - 1] ?? configs[0];
   return (
-    <button
-      className={`mode-button ${active ? 'mode-button-active' : ''}`}
-      type="button"
-      onClick={onClick}
-    >
-      <span>{label}</span>
-      <small>{subtitle}</small>
-    </button>
+    <div className={`risk-badge ${cfg.color}`}>
+      <div className="risk-gauge">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <div key={n} className={`risk-bar ${n <= level ? 'risk-bar-filled' : ''}`} />
+        ))}
+      </div>
+      <span className="risk-level-num">Lv.{level}</span>
+      <span className="risk-level-label">{cfg.label}</span>
+    </div>
   );
 }
 
-function ContextButton({
-  active,
-  label,
-  subtitle,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  subtitle: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      className={`context-button ${active ? 'context-button-active' : ''}`}
-      type="button"
-      onClick={onClick}
-    >
-      <strong>{label}</strong>
-      <span>{subtitle}</span>
-    </button>
-  );
-}
-
-function Pill({
-  tone,
-  children,
-}: {
-  tone: 'neutral' | 'success' | 'danger' | 'accent' | 'warn';
-  children: ReactNode;
-}) {
-  return <span className={`pill pill-${tone}`}>{children}</span>;
+function ProbabilityPill({ prob }: { prob: 'high' | 'medium' | 'low' }) {
+  const map = {
+    high: ['성립 가능성 높음', 'prob-high'],
+    medium: ['성립 가능성 보통', 'prob-medium'],
+    low: ['성립 가능성 낮음', 'prob-low'],
+  } as const;
+  const [label, cls] = map[prob] ?? map.low;
+  return <span className={`prob-pill ${cls}`}>{label}</span>;
 }
 
 function Field({
   label,
   value,
   onChange,
-  placeholder,
-  type = 'text',
+  type,
   autoComplete,
+  placeholder,
   note,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
-  placeholder?: string;
-  type?: string;
+  type: string;
   autoComplete?: string;
+  placeholder?: string;
   note?: string;
 }) {
   return (
-    <label className="field">
-      <span className="field-label">{label}</span>
-      {note ? <span className="field-note">{note}</span> : null}
+    <label className="auth-field">
+      <span className="auth-field-label">{label}</span>
+      {note ? <span className="auth-field-note">{note}</span> : null}
       <input
-        className="input"
+        className="input auth-input"
         type={type}
         autoComplete={autoComplete}
         placeholder={placeholder}
@@ -582,1209 +153,642 @@ function Field({
   );
 }
 
-function TextAreaField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  rows = 8,
-  note,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  rows?: number;
-  note?: string;
-}) {
-  return (
-    <label className="field">
-      <span className="field-label">{label}</span>
-      {note ? <span className="field-note">{note}</span> : null}
-      <textarea
-        className="textarea"
-        rows={rows}
-        placeholder={placeholder}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    </label>
-  );
-}
-
 function PolicyRule({ label, passed }: { label: string; passed: boolean }) {
   return (
-    <div className={`policy-rule ${passed ? 'policy-rule-pass' : 'policy-rule-miss'}`}>
-      <span className="policy-rule-state">{passed ? 'OK' : '필요'}</span>
-      <strong>{label}</strong>
-    </div>
-  );
-}
-
-function StageRow({
-  stage,
-  status,
-}: {
-  stage: { id: PipelineStage; label: string; subtitle: string };
-  status: 'done' | 'active' | 'pending';
-}) {
-  return (
-    <div className={`pipeline-row pipeline-row-${status}`}>
-      <div className="pipeline-index">{stage.label.slice(0, 2).toUpperCase()}</div>
-      <div className="pipeline-copy">
-        <strong>{stage.label}</strong>
-        <span>{stage.subtitle}</span>
-      </div>
-      <span className={`pipeline-state pipeline-state-${status}`}>
-        {status === 'done' ? '완료' : status === 'active' ? '진행' : '대기'}
-      </span>
-    </div>
-  );
-}
-
-function RiskMeter({ level }: { level: number }) {
-  const clamped = Math.max(1, Math.min(5, level || 1));
-  return (
-    <div className="risk-meter" aria-label={`위험도 Lv.${clamped}`}>
-      {[1, 2, 3, 4, 5].map((bar) => (
-        <span key={bar} className={`risk-meter-bar ${bar <= clamped ? 'risk-meter-bar-fill' : ''}`} />
-      ))}
-    </div>
-  );
-}
-
-function FilePreview({
-  image,
-  onClear,
-  onPick,
-}: {
-  image: DraftImage | null;
-  onClear: () => void;
-  onPick: () => void;
-}) {
-  return (
-    <div className={`dropzone ${image ? 'dropzone-active' : ''}`} role="button" tabIndex={0} onClick={onPick}>
-      {image ? (
-        <div className="dropzone-preview">
-          <img className="dropzone-image" src={image.preview} alt={image.name} />
-          <div className="dropzone-meta">
-            <strong>{image.name}</strong>
-            <span>{formatBytes(image.size)}</span>
-            <span>{image.type || 'image/*'}</span>
-            <button className="ghost-btn" type="button" onClick={(event) => { event.stopPropagation(); onClear(); }}>
-              제거
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="dropzone-empty">
-          <strong>캡처 이미지를 드래그하거나 클릭해서 추가</strong>
-          <span>OCR 전 단계에서 이미지 원본과 메모를 함께 묶습니다.</span>
-        </div>
-      )}
-    </div>
+    <li className={`policy-rule ${passed ? 'policy-rule-pass' : 'policy-rule-miss'}`}>
+      <span className="policy-rule-state">{passed ? 'Ready' : 'Missing'}</span>
+      <span>{label}</span>
+    </li>
   );
 }
 
 export default function App() {
-  const [authBaseUrl, setAuthBaseUrl] = useState(() => getInitialAuthBaseUrl());
-  const [authBaseUrlInput, setAuthBaseUrlInput] = useState(() => getInitialAuthBaseUrl());
-  const [authMode, setAuthMode] = useState<AuthMode>('signup');
-  const [signupEmail, setSignupEmail] = useState('');
-  const [signupPassword, setSignupPassword] = useState('');
-  const [loginEmail, setLoginEmail] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-  const [storedToken, setStoredToken] = useState<string | null>(() => loadStoredToken());
-  const [session, setSession] = useState<SessionState | null>(null);
-  const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [statusTone, setStatusTone] = useState<StatusTone>('neutral');
-  const [statusMessage, setStatusMessage] = useState(
-    '사건 파일을 입력하면 OCR, 분류, 법령, 판례, 판단이 한 화면에서 이어집니다.',
-  );
-  const [busy, setBusy] = useState<BusyAction>(null);
-  const [draft, setDraft] = useState<DraftCase>({
-    title: '새 사건 파일',
-    contextType: 'messenger',
-    mode: 'text',
-    bodyText: '',
-    linkUrl: '',
-    image: null,
-  });
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [view, setView] = useState<View>('input');
+  const [text, setText] = useState('');
+  const [contextType, setContextType] = useState<ContextType>('community');
+  const [agentProgress, setAgentProgress] = useState<string[]>([]);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const [animationIndex, setAnimationIndex] = useState(0);
-  const [historyItems, setHistoryItems] = useState<AnalysisHistoryItem[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const signupPolicy = evaluatePasswordPolicy(signupPassword);
-  const endpointDraft = normalizeBaseUrlDraft(authBaseUrlInput) || DEFAULT_AUTH_BASE_URL;
-  const endpointDirty = endpointDraft !== authBaseUrl;
-  const analysisBaseUrl = normalizeBaseUrlDraft(authBaseUrl) || DEFAULT_ANALYSIS_BASE_URL;
-  const authHealthLabel = health
-    ? `${health.service} ${new Date(health.time).toLocaleTimeString('ko-KR')}`
-    : '미확인';
+  const [session, setSession] = useState<{ user: AuthUser; token: string } | null>(null);
+  const [guestSession, setGuestSession] = useState<GuestSession>(() => getInitialGuestSession());
+
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<AuthMode>('login');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [pendingAnalysis, setPendingAnalysis] = useState<PendingAnalysis | null>(null);
 
   useEffect(() => {
-    const token = storedToken;
+    saveGuestSession(guestSession);
+  }, [guestSession]);
+
+  useEffect(() => {
+    const token = loadStoredToken();
     if (!token) {
       return;
     }
 
     let active = true;
-    setBusy('restore');
-    fetchMe(authBaseUrl, token)
+    fetchMe(AUTH_BASE_URL, token)
       .then((response) => {
         if (!active) {
           return;
         }
 
-        setSession({
-          user: response.user,
-          token,
-          issuedAt: new Date().toISOString(),
-          expiresIn: 0,
-          tokenType: response.token_type,
-        });
-        setStatusTone('success');
-        setStatusMessage(`${response.user.email} 계정으로 세션을 복원했습니다.`);
+        setSession({ user: response.user, token });
       })
-      .catch((error: unknown) => {
+      .catch(() => {
         if (!active) {
           return;
         }
 
-        if (error instanceof Error && /unauthorized/i.test(error.message)) {
-          clearStoredToken();
-          setStoredToken(null);
-        }
-
+        clearStoredToken();
         setSession(null);
-        setStatusTone('danger');
-        setStatusMessage(error instanceof Error ? error.message : '세션 복원에 실패했습니다.');
-      })
-      .finally(() => {
-        if (active) {
-          setBusy(null);
-        }
       });
 
     return () => {
       active = false;
     };
-  }, [authBaseUrl, storedToken]);
+  }, []);
 
   useEffect(() => {
-    if (busy !== 'analyze') {
-      setAnimationIndex(analysisResult ? PIPELINE_STAGES.length : 0);
+    if (!authModalOpen) {
       return;
     }
 
-    setAnimationIndex(0);
-    const timer = window.setInterval(() => {
-      setAnimationIndex((current) => Math.min(current + 1, PIPELINE_STAGES.length - 1));
-    }, 420);
-
-    return () => {
-      window.clearInterval(timer);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setAuthModalOpen(false);
+        setAuthError(null);
+      }
     };
-  }, [analysisResult, busy]);
 
-  useEffect(() => {
-    const token = session?.token;
-    if (!token) {
-      setHistoryItems([]);
-      return;
-    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [authModalOpen]);
 
-    let active = true;
-    setHistoryLoading(true);
+  const passwordPolicy = evaluatePasswordPolicy(authPassword);
+  const canUseGuest = guestSession.guestRemaining > 0;
 
-    fetchHistory(analysisBaseUrl, token)
-      .then((items) => {
-        if (active) {
-          setHistoryItems(items);
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setHistoryItems([]);
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setHistoryLoading(false);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [analysisBaseUrl, session?.token]);
-
-  function applyAuthResponse(response: AuthResponse, message: string) {
-    saveStoredToken(response.token);
-    setStoredToken(response.token);
-    setSession({
-      user: response.user,
-      token: response.token,
-      issuedAt: response.issued_at,
-      expiresIn: response.expires_in,
-      tokenType: response.token_type,
-    });
-    setStatusTone('success');
-    setStatusMessage(message);
+  function openAuthModal(mode: AuthMode) {
+    setAuthMode(mode);
+    setAuthError(null);
+    setAuthModalOpen(true);
   }
 
-  async function handleSignup(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!signupPolicy.valid) {
-      setStatusTone('danger');
-      setStatusMessage(PASSWORD_POLICY_HINT);
-      return;
-    }
-
-    setBusy('signup');
-    setStatusTone('neutral');
-    setStatusMessage('회원가입을 처리하고 있습니다...');
-
-    try {
-      const response = await signup(authBaseUrl, {
-        email: signupEmail,
-        password: signupPassword,
-      });
-      applyAuthResponse(response, '회원가입 후 세션을 자동으로 열었습니다.');
-    } catch (error) {
-      setStatusTone('danger');
-      setStatusMessage(error instanceof Error ? error.message : '회원가입에 실패했습니다.');
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function handleLogin(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setBusy('login');
-    setStatusTone('neutral');
-    setStatusMessage('로그인 중입니다...');
-
-    try {
-      const response = await login(authBaseUrl, {
-        email: loginEmail,
-        password: loginPassword,
-      });
-      applyAuthResponse(response, '로그인이 완료되었습니다.');
-    } catch (error) {
-      setStatusTone('danger');
-      setStatusMessage(error instanceof Error ? error.message : '로그인에 실패했습니다.');
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function handleHealthCheck() {
-    setBusy('health');
-    setStatusTone('neutral');
-    setStatusMessage('Auth health를 검사하고 있습니다...');
-
-    try {
-      const response = await checkHealth(endpointDraft);
-      setHealth(response);
-      setStatusTone('success');
-      setStatusMessage(`Auth API가 ${new Date(response.time).toLocaleTimeString('ko-KR')} 기준으로 응답했습니다.`);
-    } catch (error) {
-      setStatusTone('danger');
-      setStatusMessage(error instanceof Error ? error.message : 'Health check에 실패했습니다.');
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  function handleSaveEndpoint() {
-    const next = saveAuthBaseUrl(endpointDraft);
-    setAuthBaseUrl(next);
-    setAuthBaseUrlInput(next);
-    setStatusTone('success');
-    setStatusMessage(`Auth endpoint를 ${next} 로 저장했습니다.`);
-  }
-
-  function handleResetEndpoint() {
-    setAuthBaseUrlInput(DEFAULT_AUTH_BASE_URL);
-    setAuthBaseUrl(DEFAULT_AUTH_BASE_URL);
-    saveAuthBaseUrl(DEFAULT_AUTH_BASE_URL);
-    setStatusTone('neutral');
-    setStatusMessage('Auth endpoint를 기본값으로 되돌렸습니다.');
+  function closeAuthModal() {
+    setAuthModalOpen(false);
+    setAuthBusy(false);
+    setAuthError(null);
+    setAuthPassword('');
   }
 
   function handleLogout() {
     clearStoredToken();
-    setStoredToken(null);
     setSession(null);
-    setHistoryItems([]);
-    setStatusTone('neutral');
-    setStatusMessage('세션을 해제했습니다.');
+    setAuthError(null);
   }
 
-  function handleImageSelect(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) {
-      return;
-    }
+  async function runAnalysis(snapshot: PendingAnalysis, token: string | null) {
+    setAnalysisError(null);
+    setAgentProgress([]);
+    setView('analyzing');
+    setAuthModalOpen(false);
+    setAuthError(null);
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setDraft((current) => ({
-        ...current,
-        mode: 'image',
-        image: {
-          name: file.name,
-          size: file.size,
-          type: file.type,
-          preview: String(reader.result ?? ''),
-        },
-      }));
-    };
-    reader.readAsDataURL(file);
-  }
-
-  function loadSample(mode: InputMode) {
-    if (mode === 'text') {
-      setDraft({
-        title: '커뮤니티 게시글 쟁점 검토',
-        contextType: 'community',
-        mode: 'text',
-        bodyText: SAMPLE_TEXT,
-        linkUrl: '',
-        image: null,
-      });
-      setAnalysisError(null);
-      return;
-    }
-
-    if (mode === 'link') {
-      setDraft({
-        title: '링크 크롤링 검토',
-        contextType: 'other',
-        mode: 'link',
-        bodyText: '게시글 전체 문맥과 댓글 구조를 확인해야 합니다.',
-        linkUrl: SAMPLE_LINK,
-        image: null,
-      });
-      setAnalysisError(null);
-      return;
-    }
-
-    setDraft({
-      title: '메신저 캡처 OCR 검토',
-      contextType: 'messenger',
-      mode: 'image',
-      bodyText: '상대방이 여러 차례 반복적으로 협박과 모욕을 했다는 정황이 보입니다.',
-      linkUrl: '',
-      image: {
-        name: 'sample-messenger.png',
-        size: 248_112,
-        type: 'image/png',
-        preview:
-          'data:image/svg+xml;charset=UTF-8,' +
-          encodeURIComponent(
-            `<svg xmlns="http://www.w3.org/2000/svg" width="920" height="560">
-              <defs>
-                <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stop-color="#f8f2e8"/>
-                  <stop offset="100%" stop-color="#dfe7f2"/>
-                </linearGradient>
-              </defs>
-              <rect width="920" height="560" fill="url(#bg)"/>
-              <rect x="66" y="70" width="788" height="420" rx="26" fill="#ffffff" stroke="#163552" stroke-width="3"/>
-              <rect x="110" y="116" width="280" height="34" rx="17" fill="#163552"/>
-              <rect x="110" y="184" width="604" height="18" rx="9" fill="#9bb0c9"/>
-              <rect x="110" y="228" width="520" height="18" rx="9" fill="#c5d0df"/>
-              <rect x="110" y="272" width="476" height="18" rx="9" fill="#c5d0df"/>
-              <rect x="110" y="316" width="566" height="18" rx="9" fill="#c5d0df"/>
-              <rect x="110" y="360" width="420" height="18" rx="9" fill="#c5d0df"/>
-              <text x="110" y="92" fill="#163552" font-size="28" font-family="serif">OCR Sample</text>
-              <text x="110" y="456" fill="#5d6877" font-size="24" font-family="sans-serif">이미지 업로드 시 OCR Agent 연결 예정</text>
-            </svg>`,
-          ),
-      },
+    AGENT_STEPS.forEach((step, index) => {
+      window.setTimeout(() => {
+        setAgentProgress((prev) => (prev.includes(step.id) ? prev : [...prev, step.id]));
+      }, index * 600);
     });
-    setAnalysisError(null);
-  }
-
-  function resetDraft() {
-    setDraft({
-      title: '새 사건 파일',
-      contextType: 'messenger',
-      mode: 'text',
-      bodyText: '',
-      linkUrl: '',
-      image: null,
-    });
-    setAnalysisResult(null);
-    setAnalysisError(null);
-    setStatusTone('neutral');
-    setStatusMessage('사건 파일을 비웠습니다.');
-  }
-
-  function composeAnalysisText(nextDraft: DraftCase) {
-    const parts = [
-      `사건 제목: ${nextDraft.title}`,
-      `분류: ${formatContextLabel(nextDraft.contextType)}`,
-      `입력 방식: ${formatSourceLabel(nextDraft.mode)}`,
-    ];
-
-    if (nextDraft.mode === 'text' && nextDraft.bodyText.trim()) {
-      parts.push(`원문:\n${nextDraft.bodyText.trim()}`);
-    }
-
-    if (nextDraft.mode === 'image') {
-      parts.push(`이미지 파일: ${nextDraft.image ? `${nextDraft.image.name} (${formatBytes(nextDraft.image.size)})` : '첨부되지 않음'}`);
-      if (nextDraft.bodyText.trim()) {
-        parts.push(`OCR 메모:\n${nextDraft.bodyText.trim()}`);
-      }
-    }
-
-    if (nextDraft.mode === 'link') {
-      parts.push(`링크: ${nextDraft.linkUrl.trim()}`);
-      if (nextDraft.bodyText.trim()) {
-        parts.push(`크롤링 메모:\n${nextDraft.bodyText.trim()}`);
-      }
-    }
-
-    return parts.join('\n\n').trim();
-  }
-
-  async function handleAnalyze(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!session?.token) {
-      setAnalysisError('로그인 후 사건 분석을 시작할 수 있습니다.');
-      setStatusTone('danger');
-      setStatusMessage('분석을 시작하려면 로그인 또는 회원가입이 필요합니다.');
-      return;
-    }
-
-    const hasText = draft.bodyText.trim().length > 0;
-    const hasImage = draft.mode === 'image' && Boolean(draft.image);
-    const hasLink = draft.mode === 'link' && draft.linkUrl.trim().length > 0;
-
-    if (draft.mode === 'text' && !hasText) {
-      setAnalysisError('텍스트를 입력한 뒤 분석을 시작하세요.');
-      return;
-    }
-
-    if (draft.mode === 'image' && !hasImage) {
-      setAnalysisError('이미지 파일을 먼저 추가한 뒤 분석을 시작하세요.');
-      return;
-    }
-
-    if (draft.mode === 'link' && !hasLink && !hasText) {
-      setAnalysisError('링크 주소 또는 크롤링 메모를 먼저 넣어주세요.');
-      return;
-    }
-
-    setBusy('analyze');
-    setAnalysisError(null);
-    setStatusTone('neutral');
-    setStatusMessage('OCR, 분류, 법령, 판례, 판단 순서로 분석하고 있습니다...');
 
     try {
-      const payload =
-        draft.mode === 'image'
-          ? await analyzeCase(analysisBaseUrl, session.token, {
-              title: draft.title,
-              context_type: draft.contextType,
-              input_mode: 'image',
-              text: draft.bodyText.trim(),
-              image_base64: draft.image?.preview,
-              image_name: draft.image?.name,
-              image_mime_type: draft.image?.type,
-            })
-          : draft.mode === 'link'
-            ? await analyzeCase(analysisBaseUrl, session.token, {
-                title: draft.title,
-                context_type: draft.contextType,
-                input_mode: 'link',
-                text: draft.bodyText.trim(),
-                url: draft.linkUrl.trim(),
-              })
-            : await analyzeCase(analysisBaseUrl, session.token, {
-                title: draft.title,
-                context_type: draft.contextType,
-                input_mode: 'text',
-                text: composeAnalysisText(draft),
-              });
-      const normalized = normalizeAnalysisResponse(payload, draft);
-      setAnalysisResult(normalized);
-      setAnalysisError(null);
-      setStatusTone('success');
-      setStatusMessage('분석 결과를 불러왔습니다.');
-      const nextHistory = await fetchHistory(analysisBaseUrl, session.token);
-      setHistoryItems(nextHistory);
-    } catch (error) {
-      setAnalysisResult(null);
-      setAnalysisError(error instanceof Error ? error.message : '분석 중 오류가 발생했습니다.');
-      setStatusTone('danger');
-      setStatusMessage(
-        error instanceof Error
-          ? `분석 요청에 실패했습니다. (${error.message})`
-          : '분석 요청에 실패했습니다.',
-      );
-    } finally {
-      setBusy(null);
+      const response = (await analyzeCase(ANALYSIS_BASE_URL, token, {
+        title: '텍스트 분석',
+        input_mode: 'text',
+        text: snapshot.text.trim(),
+        context_type: snapshot.contextType,
+        ...(token
+          ? {}
+          : {
+              guest_id: guestSession.guestId,
+            }),
+      })) as AnalyzeResponse;
+
+      await delay(AGENT_STEPS.length * 600 + 300);
+
+      const analysis = response.legal_analysis;
+      if (!analysis) {
+        throw new Error('분석 결과를 불러오지 못했습니다.');
+      }
+
+      if (!token) {
+        const nextRemaining =
+          typeof response.guest_remaining === 'number'
+            ? Math.max(0, response.guest_remaining)
+            : Math.max(0, guestSession.guestRemaining - 1);
+
+        setGuestSession({
+          guestId: response.guest_id ?? response.meta?.guest_id ?? guestSession.guestId,
+          guestRemaining: nextRemaining,
+        });
+      }
+
+      setResult(analysis);
+      setPendingAnalysis(null);
+      setView('results');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '분석 중 오류가 발생했습니다.';
+      const unauthorized = /unauthorized|401/i.test(message);
+
+      if (unauthorized && token) {
+        clearStoredToken();
+        setSession(null);
+        setPendingAnalysis(snapshot);
+        setAuthMode('login');
+        setAuthError('세션이 만료되었습니다. 다시 로그인하세요.');
+        setAuthModalOpen(true);
+        setView('input');
+        return;
+      }
+
+      setAnalysisError(message);
+      setView('input');
     }
   }
 
-  const pipelineStatus = PIPELINE_STAGES.map((stage, index) => {
-    if (analysisResult) {
-      return { stage, status: 'done' as const };
+  async function handleAnalyzeClick() {
+    if (!text.trim()) {
+      return;
     }
 
-    if (busy === 'analyze') {
-      if (index < animationIndex) {
-        return { stage, status: 'done' as const };
-      }
+    const snapshot = { text, contextType };
 
-      if (index === animationIndex) {
-        return { stage, status: 'active' as const };
-      }
-
-      return { stage, status: 'pending' as const };
+    if (session) {
+      await runAnalysis(snapshot, session.token);
+      return;
     }
 
-    return {
-      stage,
-      status: index === 0 && analysisResult ? ('done' as const) : ('pending' as const),
+    setPendingAnalysis(snapshot);
+    setAuthMode('login');
+    setAuthError(
+      canUseGuest
+        ? null
+        : '게스트 무료 3회를 모두 사용했습니다. 로그인 또는 회원가입이 필요합니다.',
+    );
+    setAuthModalOpen(true);
+  }
+
+  async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthBusy(true);
+    setAuthError(null);
+
+    const payload = {
+      email: authEmail.trim(),
+      password: authPassword,
     };
-  });
 
-  const currentSourceChip = draft.mode === 'image' ? '이미지 OCR' : draft.mode === 'link' ? '링크 크롤링' : '텍스트 분석';
-  const activeContext = formatContextLabel(draft.contextType);
-  const result = analysisResult;
+    try {
+      const response: AuthResponse =
+        authMode === 'signup'
+          ? await signup(AUTH_BASE_URL, payload)
+          : await login(AUTH_BASE_URL, payload);
 
-  return (
-    <div className="shell">
-      <header className="topbar">
-        <div className="brand-block">
-          <div className="brand-mark">K</div>
-          <div className="brand-copy">
-            <p className="brand-kicker">KoreanLaw / legal intelligence workspace</p>
-            <h1 className="brand-name">KoreanLaw</h1>
-            <p className="brand-subtitle">사건 파일 · OCR · 법령 · 판례 · 판단이 한 화면에서 이어집니다</p>
+      saveStoredToken(response.token);
+      setSession({ user: response.user, token: response.token });
+      setAuthBusy(false);
+      setAuthModalOpen(false);
+      setAuthPassword('');
+
+      if (pendingAnalysis) {
+        const snapshot = pendingAnalysis;
+        setPendingAnalysis(null);
+        await runAnalysis(snapshot, response.token);
+      }
+    } catch (err) {
+      setAuthBusy(false);
+      setAuthError(err instanceof Error ? err.message : '인증 처리 중 오류가 발생했습니다.');
+    }
+  }
+
+  async function handleGuestContinue() {
+    if (!pendingAnalysis || guestSession.guestRemaining <= 0) {
+      setAuthError('게스트 무료 횟수가 남아 있지 않습니다. 로그인 또는 회원가입이 필요합니다.');
+      return;
+    }
+
+    const snapshot = pendingAnalysis;
+    setPendingAnalysis(null);
+    await runAnalysis(snapshot, null);
+  }
+
+  function handleReset() {
+    setText('');
+    setResult(null);
+    setAgentProgress([]);
+    setAnalysisError(null);
+    setView('input');
+  }
+
+  const headerActions = (
+    <div className="auth-controls">
+      {!session ? (
+        <>
+          <span className={`guest-pill ${guestSession.guestRemaining > 0 ? 'guest-pill-ready' : 'guest-pill-empty'}`}>
+            게스트 {guestSession.guestRemaining}/3
+          </span>
+          <button className="auth-btn auth-btn-ghost" onClick={() => openAuthModal('login')} type="button">
+            로그인
+          </button>
+          <button className="auth-btn auth-btn-solid" onClick={() => openAuthModal('signup')} type="button">
+            회원가입
+          </button>
+        </>
+      ) : (
+        <>
+          <span className="session-pill">{session.user.email}</span>
+          <button className="auth-btn auth-btn-ghost" onClick={handleLogout} type="button">
+            로그아웃
+          </button>
+        </>
+      )}
+    </div>
+  );
+
+  const inputView = (
+    <main className="input-main">
+      <section className="hero">
+        <p className="hero-tag">무료 · 즉시 분석 · 익명 사용 가능</p>
+        <h1 className="hero-title">
+          온라인 피해, 법적으로
+          <br />
+          따져드립니다
+        </h1>
+        <p className="hero-desc">
+          커뮤니티 게시글, 게임 채팅, 메신저 대화를 붙여넣으면
+          <br />
+          명예훼손·협박·모욕 등 법적 쟁점과 관련 법령·판례를 분석해드립니다.
+        </p>
+      </section>
+
+      <div className="input-card">
+        <div className="section-label">대화 출처</div>
+        <div className="context-grid">
+          {CONTEXT_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              className={`context-btn ${contextType === opt.value ? 'context-btn-active' : ''}`}
+              onClick={() => setContextType(opt.value)}
+              type="button"
+            >
+              <span className="context-icon">{opt.icon}</span>
+              <span className="context-label">{opt.label}</span>
+              <span className="context-desc">{opt.desc}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="section-label" style={{ marginTop: '24px' }}>
+          분석할 내용 <span className="label-required">*</span>
+        </div>
+        <textarea
+          className="text-input"
+          placeholder={`상대방이 한 말, 게시글 내용, 대화 내용을 그대로 붙여넣어 주세요.\n\n예: "너 사기꾼인 거 다 퍼뜨리겠다. 네 신상이랑 전화번호 올려버릴 거야."`}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={7}
+        />
+        <div className="char-count">{text.length}자</div>
+
+        {analysisError && <div className="error-banner">{analysisError}</div>}
+
+        <button className="analyze-btn" onClick={() => void handleAnalyzeClick()} disabled={!text.trim()} type="button">
+          법적 분석 시작
+          <span className="analyze-arrow">→</span>
+        </button>
+
+        <p className="guest-note">
+          비로그인 상태에서는 게스트로 총 3회까지 사용할 수 있습니다. 남은 횟수는 우측 상단에서
+          확인할 수 있습니다.
+        </p>
+
+        <p className="input-disclaimer">
+          업로드된 내용은 분석 후 즉시 삭제되며 서버에 저장되지 않습니다. 본 서비스는
+          법률 정보 제공 목적이며 법적 효력이 없습니다.
+        </p>
+      </div>
+
+      <div className="how-it-works">
+        <div className="hiw-step">
+          <div className="hiw-num">1</div>
+          <div className="hiw-text">
+            <strong>내용 붙여넣기</strong>
+            <span>피해를 입은 대화·게시글 내용 입력</span>
           </div>
         </div>
-        <div className="topbar-right">
-          <Pill tone={session ? 'success' : 'neutral'}>{session ? session.user.email : '로그인 필요'}</Pill>
-          <Pill tone="accent">{authHealthLabel}</Pill>
-          <Pill tone="warn">{currentSourceChip}</Pill>
+        <div className="hiw-arrow">→</div>
+        <div className="hiw-step">
+          <div className="hiw-num">2</div>
+          <div className="hiw-text">
+            <strong>AI 분석</strong>
+            <span>법령·판례 기반 자동 쟁점 분류</span>
+          </div>
         </div>
-      </header>
+        <div className="hiw-arrow">→</div>
+        <div className="hiw-step">
+          <div className="hiw-num">3</div>
+          <div className="hiw-text">
+            <strong>결과 확인</strong>
+            <span>혐의·근거·권장 행동 리포트 제공</span>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
 
-      <main className="workspace">
-        <section className="hero-panel panel">
-          <div className="hero-copy">
-            <p className="hero-label">6-agent pipeline · auth ready · case-first UX</p>
-            <h2 className="hero-title">캡처, 텍스트, 링크를 한 사건 파일로 묶어 법적 판단까지 끌고 갑니다.</h2>
-            <p className="hero-text">
-              KoreanLaw는 로그인과 세션 복원을 유지하면서, OCR Agent, Classifier Agent, Law Search
-              Agent, Precedent Agent, Legal Analysis Agent의 흐름을 한 화면 안에 보여주는 법률
-              작업대입니다.
+  const analyzingView = (
+    <main className="analyzing-main">
+      <div className="analyzing-card">
+        <div className="spinner" />
+        <h2 className="analyzing-title">분석 중입니다</h2>
+        <p className="analyzing-sub">법령과 판례 데이터베이스를 조회하고 있습니다</p>
+
+        <div className="pipeline">
+          {AGENT_STEPS.map((step, i) => {
+            const done = agentProgress.includes(step.id);
+            const active = agentProgress.length === i;
+            return (
+              <div
+                key={step.id}
+                className={`pipeline-step ${done ? 'step-done' : active ? 'step-active' : 'step-waiting'}`}
+              >
+                <div className="step-indicator">
+                  {done ? '✓' : active ? <span className="step-dot-pulse" /> : <span className="step-dot" />}
+                </div>
+                <div className="step-info">
+                  <strong>{step.label}</strong>
+                  <span>{step.desc}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </main>
+  );
+
+  const resultsView = result ? (
+    <main className="results-main">
+      <div className={`summary-banner ${result.can_sue ? 'banner-warn' : 'banner-info'}`}>
+        <div className="banner-left">
+          <RiskBadge level={result.risk_level} />
+          <div className="banner-text">
+            <h2 className="banner-title">{result.summary}</h2>
+            <p className="banner-sub">
+              {result.can_sue
+                ? '형사 고소 또는 민사 손해배상을 검토해볼 수 있습니다.'
+                : '현재 입력 기준으로 명확한 법적 쟁점이 식별되지 않았습니다.'}
             </p>
-            <div className="hero-meta">
-              <Pill tone="neutral">{activeContext}</Pill>
-              <Pill tone="neutral">{draft.title}</Pill>
-              <Pill tone="neutral">{session ? '세션 복원됨' : '세션 대기'}</Pill>
-            </div>
           </div>
+        </div>
+        <div className={`can-sue-badge ${result.can_sue ? 'sue-yes' : 'sue-no'}`}>
+          {result.can_sue ? '고소 가능' : '고소 어려움'}
+        </div>
+      </div>
 
-          <div className="hero-rail">
-            <div className="hero-stat-row">
-              <div className="hero-stat">
-                <strong className="hero-stat-value">3</strong>
-                <span className="hero-stat-label">입력 방식</span>
-              </div>
-              <div className="hero-stat">
-                <strong className="hero-stat-value">6</strong>
-                <span className="hero-stat-label">에이전트 단계</span>
-              </div>
-              <div className="hero-stat">
-                <strong className="hero-stat-value">1</strong>
-                <span className="hero-stat-label">Auth / DB 계층</span>
-              </div>
-            </div>
-
-            <div className="hero-rule">
-              <span className="tiny-label">작업 원칙</span>
-              <p className="hero-rule-note">
-                이메일 + 비밀번호로 계정을 만들고, 캡처 이미지는 OCR 슬롯으로, 링크는 크롤링 슬롯으로,
-                텍스트는 본문 슬롯으로 들어갑니다.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section className="studio-grid">
-          <div className="main-column">
-            <article className="panel">
-              <div className="panel-head">
-                <div>
-                  <p className="panel-kicker">Case Desk</p>
-                  <h3 className="panel-title">사건 입력</h3>
-                  <p className="panel-subtitle">텍스트, 이미지, 링크를 하나의 파일로 묶어서 분석에 넘깁니다.</p>
-                </div>
-                <div className="chip-row">
-                  <Pill tone={draft.mode === 'text' ? 'accent' : 'neutral'}>텍스트</Pill>
-                  <Pill tone={draft.mode === 'image' ? 'accent' : 'neutral'}>이미지</Pill>
-                  <Pill tone={draft.mode === 'link' ? 'accent' : 'neutral'}>링크</Pill>
-                </div>
-              </div>
-
-              <div className="input-row">
-                {INPUT_MODES.map((item) => (
-                  <ModeButton
-                    key={item.value}
-                    active={draft.mode === item.value}
-                    label={item.label}
-                    subtitle={item.subtitle}
-                    onClick={() => setDraft((current) => ({ ...current, mode: item.value }))}
-                  />
-                ))}
-              </div>
-
-              <div className="input-grid">
-                <Field
-                  label="사건 제목"
-                  value={draft.title}
-                  onChange={(value) => setDraft((current) => ({ ...current, title: value }))}
-                  placeholder="예: 메신저 협박 / 게시글 명예훼손"
-                />
-
-                <div className="field">
-                  <span className="field-label">사건 출처</span>
-                  <div className="context-row">
-                    {CONTEXT_OPTIONS.map((item) => (
-                      <ContextButton
-                        key={item.value}
-                        active={draft.contextType === item.value}
-                        label={item.label}
-                        subtitle={item.subtitle}
-                        onClick={() => setDraft((current) => ({ ...current, contextType: item.value }))}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="panel-divider" />
-
-              {draft.mode === 'text' ? (
-                <TextAreaField
-                  label="분석할 텍스트"
-                  note="복사한 원문, 게시글, 대화 내용을 그대로 넣으세요."
-                  value={draft.bodyText}
-                  onChange={(value) => setDraft((current) => ({ ...current, bodyText: value }))}
-                  placeholder="상대방이 어떤 표현을 했는지, 게시 범위가 어떤지, 피해가 어떤지 적어주세요."
-                  rows={10}
-                />
-              ) : null}
-
-              {draft.mode === 'image' ? (
-                <div className="field">
-                  <span className="field-label">캡처 이미지</span>
-                  <span className="field-note">이미지 파일을 올리면 OCR Agent 슬롯이 채워집니다.</span>
-                  <input
-                    ref={fileInputRef}
-                    className="file-input"
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageSelect}
-                  />
-                  <FilePreview
-                    image={draft.image}
-                    onPick={() => fileInputRef.current?.click()}
-                    onClear={() => setDraft((current) => ({ ...current, image: null }))}
-                  />
-                  <TextAreaField
-                    label="OCR 메모"
-                    note="이미지 안에서 눈에 띄는 문장, 발화자, 반복성을 메모로 남기세요."
-                    value={draft.bodyText}
-                    onChange={(value) => setDraft((current) => ({ ...current, bodyText: value }))}
-                    placeholder="예: 상대가 '사기꾼'이라고 여러 번 말했고, 전화번호 공개를 언급했다."
-                    rows={5}
-                  />
-                </div>
-              ) : null}
-
-              {draft.mode === 'link' ? (
-                <div className="field">
-                  <span className="field-label">분석할 링크</span>
-                  <span className="field-note">링크를 보내면 후속 crawler agent 슬롯으로 이어질 수 있습니다.</span>
-                  <input
-                    className="input"
-                    type="url"
-                    placeholder="https://..."
-                    value={draft.linkUrl}
-                    onChange={(event) => setDraft((current) => ({ ...current, linkUrl: event.target.value }))}
-                  />
-                  <div className="dropzone dropzone-active">
-                    <div className="dropzone-empty">
-                      <strong>{draft.linkUrl.trim() || '링크 미입력'}</strong>
-                      <span>{draft.linkUrl.trim() ? '크롤링 슬롯이 이 주소를 기준으로 동작합니다.' : 'URL을 넣으면 원문 구조와 댓글 흐름을 함께 읽을 수 있습니다.'}</span>
+      <div className="results-grid">
+        <div className="results-col">
+          {result.charges.length > 0 && (
+            <section className="result-section">
+              <h3 className="section-title">탐지된 법적 쟁점</h3>
+              <div className="charge-list">
+                {result.charges.map((charge, i) => (
+                  <div key={i} className="charge-card">
+                    <div className="charge-header">
+                      <span className="charge-name">{charge.charge}</span>
+                      <ProbabilityPill prob={charge.probability} />
                     </div>
-                  </div>
-                  <TextAreaField
-                    label="링크 메모"
-                    note="무엇을 확인해야 하는지 한 줄만 적어도 충분합니다."
-                    value={draft.bodyText}
-                    onChange={(value) => setDraft((current) => ({ ...current, bodyText: value }))}
-                    placeholder="예: 작성자, 댓글 흐름, 삭제 여부를 확인하고 싶습니다."
-                    rows={4}
-                  />
-                </div>
-              ) : null}
-
-              {analysisError ? <div className="status-banner status-banner-danger">{analysisError}</div> : null}
-
-              <div className="launch-bar">
-                <div className="launch-copy">
-                  <span className="tiny-label">입력 상태</span>
-                  <strong>{draft.mode === 'image' ? (draft.image ? '이미지 준비됨' : '이미지를 추가하세요') : draft.mode === 'link' ? (draft.linkUrl.trim() ? '링크 준비됨' : '링크를 추가하세요') : draft.bodyText.trim() ? '텍스트 준비됨' : '텍스트를 추가하세요'}</strong>
-                  <p>{statusMessage}</p>
-                </div>
-                <div className="launch-actions">
-                  <button className="secondary-btn" type="button" onClick={() => loadSample('text')}>
-                    텍스트 예시
-                  </button>
-                  <button className="secondary-btn" type="button" onClick={() => loadSample('image')}>
-                    이미지 예시
-                  </button>
-                  <button className="secondary-btn" type="button" onClick={() => loadSample('link')}>
-                    링크 예시
-                  </button>
-                  <button className="ghost-btn" type="button" onClick={resetDraft}>
-                    파일 초기화
-                  </button>
-                </div>
-              </div>
-
-              <form onSubmit={handleAnalyze} className="panel-foot">
-                <button className="primary-btn" type="submit" disabled={busy === 'analyze'}>
-                  {busy === 'analyze' ? '분석 중...' : '사건 분석 시작'}
-                </button>
-              </form>
-            </article>
-
-            <article className="panel result-panel">
-              <div className="panel-head">
-                <div>
-                  <p className="panel-kicker">Decision Rail</p>
-                  <h3 className="panel-title">분석 결과</h3>
-                  <p className="panel-subtitle">
-                    OCR, 분류, 법령, 판례, 판단 결과를 한 번에 읽을 수 있도록 재배치했습니다.
-                  </p>
-                </div>
-                <div className="chip-row">
-                  <Pill tone={result?.meta?.provider_mode === 'local' ? 'warn' : 'success'}>
-                    {result?.meta?.provider_mode === 'local' ? '로컬 초안' : 'API 연결됨'}
-                  </Pill>
-                  <Pill tone={result?.canSue ? 'success' : 'neutral'}>{result?.canSue ? '고소 검토 가능' : '추가 검토 필요'}</Pill>
-                </div>
-              </div>
-
-              {result ? (
-                <>
-                  <div className="result-banner">
-                    <div className="result-banner-main">
-                      <RiskMeter level={result.riskLevel} />
-                      <div>
-                        <span className="tiny-label">핵심 판단</span>
-                        <h4>{result.summary}</h4>
-                        <p>{result.canSue ? '증거를 묶으면 실무 검토를 바로 시작할 수 있습니다.' : '추가 사실관계를 보강하면 판단 품질이 올라갑니다.'}</p>
+                    <div className="charge-basis">{charge.basis}</div>
+                    {charge.expected_penalty && (
+                      <div className="charge-penalty">
+                        <span className="penalty-label">예상 처벌</span>
+                        {charge.expected_penalty}
                       </div>
-                    </div>
-                    <div className="result-meta">
-                      <div className="result-meta-item">
-                        <span className="result-meta-label">입력 방식</span>
-                        <strong className="result-meta-value">{result.sourceLabel}</strong>
-                      </div>
-                      <div className="result-meta-item">
-                        <span className="result-meta-label">분류</span>
-                        <strong className="result-meta-value">{activeContext}</strong>
-                      </div>
-                      <div className="result-meta-item">
-                        <span className="result-meta-label">생성 시각</span>
-                        <strong className="result-meta-value">
-                          {result.meta?.generated_at ? formatIssuedAt(result.meta.generated_at) : '확인 전'}
-                        </strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="result-grid">
-                    <section className="result-card">
-                      <div className="result-card-head">
-                        <div>
-                          <p className="panel-kicker">쟁점 카드</p>
-                          <h4 className="result-card-title">법적 쟁점</h4>
+                    )}
+                    <div className="elements-list">
+                      {charge.elements_met.map((el, j) => (
+                        <div key={j} className="element-item">
+                          <span className="element-dot" />
+                          {el}
                         </div>
-                        <Pill tone="accent">{result.issueCards.length}건</Pill>
-                      </div>
-                      <div className="result-list">
-                        {result.issueCards.map((item) => (
-                          <article className="result-list-item" key={`${item.title}-${item.basis}`}>
-                            <div className="result-list-bullet" />
-                            <div>
-                              <strong>{item.title}</strong>
-                              <p>{item.basis}</p>
-                              <div className="chip-row">
-                                <Pill tone={item.probability === 'high' ? 'danger' : item.probability === 'medium' ? 'warn' : 'neutral'}>
-                                  {item.probability === 'high' ? '높음' : item.probability === 'medium' ? '보통' : '낮음'}
-                                </Pill>
-                                <span className="session-key">{item.expected_penalty}</span>
-                              </div>
-                              {item.checklist.length > 0 ? (
-                                <ul className="mini-list">
-                                  {item.checklist.map((line) => (
-                                    <li key={line} className="mini-list-item">
-                                      <span className="mini-list-dot" />
-                                      <span>{line}</span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              ) : null}
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                    </section>
-
-                    <section className="result-card">
-                      <div className="result-card-head">
-                        <div>
-                          <p className="panel-kicker">판례 카드</p>
-                          <h4 className="result-card-title">유사 판례</h4>
-                        </div>
-                        <Pill tone="neutral">similarity</Pill>
-                      </div>
-                      <div className="result-list">
-                        {result.precedentCards.map((item) => (
-                          <article className="result-list-item" key={`${item.case_no}-${item.court}`}>
-                            <div className="result-list-bullet" />
-                            <div>
-                              <strong>{item.case_no}</strong>
-                              <p>
-                                {item.court} · {item.verdict} · {formatSimilarity(item.similarity_score)}
-                              </p>
-                              <span>{item.summary}</span>
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                    </section>
-
-                    <section className="result-card">
-                      <div className="result-card-head">
-                        <div>
-                          <p className="panel-kicker">Evidence Stack</p>
-                          <h4 className="result-card-title">증거 체크리스트</h4>
-                        </div>
-                        <Pill tone="warn">{result.evidenceToCollect.length}</Pill>
-                      </div>
-                      <ul className="bullet-stack">
-                        {result.evidenceToCollect.map((item) => (
-                          <li key={item}>{item}</li>
-                        ))}
-                      </ul>
-                    </section>
-
-                    <section className="result-card">
-                      <div className="result-card-head">
-                        <div>
-                          <p className="panel-kicker">Action Plan</p>
-                          <h4 className="result-card-title">권장 대응</h4>
-                        </div>
-                        <Pill tone="success">{result.recommendedActions.length}</Pill>
-                      </div>
-                      <ul className="bullet-stack">
-                        {result.recommendedActions.map((item) => (
-                          <li key={item}>{item}</li>
-                        ))}
-                      </ul>
-                    </section>
-                  </div>
-
-                  <section className="pipeline-panel-inner">
-                    <div className="panel-head">
-                      <div>
-                        <p className="panel-kicker">Pipeline Trace</p>
-                        <h4 className="result-card-title">에이전트 진행 상태</h4>
-                      </div>
-                      <Pill tone={result.timeline.length > 0 ? 'success' : 'neutral'}>
-                        {result.timeline.length > 0 ? '실제 타임라인' : '작업 타임라인 없음'}
-                      </Pill>
-                    </div>
-                    <div className="pipeline-list">
-                      {pipelineStatus.map(({ stage, status }) => (
-                        <StageRow key={stage.id} stage={stage} status={status} />
                       ))}
                     </div>
-                  </section>
-
-                  <div className="status-banner status-banner-neutral">
-                    <strong>Disclaimer</strong>
-                    <p>{result.disclaimer}</p>
                   </div>
-                </>
-              ) : (
-                <div className="empty-state">
-                  <h4 className="empty-state-title">아직 결과가 없습니다.</h4>
-                  <p className="empty-state-copy">
-                    텍스트, 이미지, 링크 중 하나를 넣고 분석을 시작하면 이 영역에 법적 쟁점, 판례, 증거,
-                    권장 대응이 표시됩니다.
-                  </p>
-                </div>
-              )}
-            </article>
-          </div>
+                ))}
+              </div>
+            </section>
+          )}
 
-          <aside className="rail">
-            <article className="panel">
-              <div className="panel-head">
-                <div>
-                  <p className="panel-kicker">Access</p>
-                  <h3 className="panel-title">회원가입 / 로그인</h3>
-                  <p className="panel-subtitle">Auth session은 로컬 저장소와 JWT 검증으로 유지됩니다.</p>
+          {result.precedent_cards.length > 0 && (
+            <section className="result-section">
+              <h3 className="section-title">유사 판례</h3>
+              <div className="precedent-list">
+                {result.precedent_cards.map((p, i) => (
+                  <div key={i} className="precedent-card">
+                    <div className="precedent-header">
+                      <span className="precedent-no">{p.case_no}</span>
+                      <span className="precedent-court">{p.court}</span>
+                      <span
+                        className={`verdict-badge ${p.verdict === '유죄' ? 'verdict-guilty' : 'verdict-not-guilty'}`}
+                      >
+                        {p.verdict}
+                      </span>
+                    </div>
+                    {p.summary && <p className="precedent-summary">{p.summary}</p>}
+                    {p.similarity_score > 0 && (
+                      <div className="similarity">
+                        유사도
+                        <div className="similarity-bar">
+                          <div className="similarity-fill" style={{ width: `${p.similarity_score * 100}%` }} />
+                        </div>
+                        <span>{Math.round(p.similarity_score * 100)}%</span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+
+        <div className="results-col results-col-side">
+          <section className="result-section">
+            <h3 className="section-title">권장 행동</h3>
+            <div className="action-list">
+              {result.recommended_actions.map((action, i) => (
+                <div key={i} className="action-item">
+                  <div className="action-check">
+                    <span>{i + 1}</span>
+                  </div>
+                  <p>{action}</p>
                 </div>
-                <div className="auth-tabs">
-                  <button
-                    className={`mode-button ${authMode === 'signup' ? 'mode-button-active' : ''}`}
-                    type="button"
-                    onClick={() => setAuthMode('signup')}
-                  >
-                    회원가입
-                  </button>
-                  <button
-                    className={`mode-button ${authMode === 'login' ? 'mode-button-active' : ''}`}
-                    type="button"
-                    onClick={() => setAuthMode('login')}
-                  >
-                    로그인
-                  </button>
-                </div>
+              ))}
+            </div>
+          </section>
+
+          {result.evidence_to_collect.length > 0 && (
+            <section className="result-section">
+              <h3 className="section-title">수집해야 할 증거</h3>
+              <div className="evidence-list">
+                {result.evidence_to_collect.map((ev, i) => (
+                  <div key={i} className="evidence-item">
+                    <span className="evidence-icon">📎</span>
+                    {ev}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <div className="disclaimer-box">
+            <span className="disclaimer-icon">ⓘ</span>
+            <p>{result.disclaimer}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="results-footer">
+        <button className="analyze-btn analyze-btn-outline" onClick={handleReset} type="button">
+          다른 내용 분석하기
+        </button>
+      </div>
+    </main>
+  ) : null;
+
+  return (
+    <div className="page">
+      <header className="top-bar">
+        <div className="logo">
+          <span className="logo-icon">⚖</span>
+          <span className="logo-text">KoreanLaw</span>
+        </div>
+        <span className="top-bar-sub">AI 법률 분석 서비스</span>
+        <div className="top-bar-spacer" />
+        {headerActions}
+      </header>
+
+      {view === 'input' ? inputView : view === 'analyzing' ? analyzingView : resultsView}
+
+      {authModalOpen && (
+        <div className="modal-backdrop" onClick={closeAuthModal} role="presentation">
+          <div className="auth-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="auth-modal-aside">
+              <p className="auth-modal-kicker">계정 인증</p>
+              <h2 className="auth-modal-title">분석을 이어가려면 로그인하거나 게스트로 진행하세요</h2>
+              <p className="auth-modal-copy">
+                로그인하면 분석 이력과 세션 복원이 가능하고, 게스트는 총 3회까지 바로 사용할 수 있습니다.
+              </p>
+
+              <div className="auth-modal-stat">
+                <span>게스트 잔여</span>
+                <strong>{guestSession.guestRemaining}/3</strong>
               </div>
 
-              <form className="auth-form" onSubmit={authMode === 'signup' ? handleSignup : handleLogin}>
+              <div className="auth-modal-note">
+                <span className="disclaimer-icon">ⓘ</span>
+                <p>
+                  비밀번호는 {PASSWORD_POLICY_HINT} 기준을 만족해야 합니다. 이메일 인증은 추후에 추가할 수
+                  있도록 현재는 제외했습니다.
+                </p>
+              </div>
+            </div>
+
+            <div className="auth-modal-panel">
+              <div className="auth-tabs" role="tablist" aria-label="인증 방식">
+                <button
+                  type="button"
+                  className={`auth-tab ${authMode === 'login' ? 'auth-tab-active' : ''}`}
+                  onClick={() => {
+                    setAuthMode('login');
+                    setAuthError(null);
+                  }}
+                >
+                  로그인
+                </button>
+                <button
+                  type="button"
+                  className={`auth-tab ${authMode === 'signup' ? 'auth-tab-active' : ''}`}
+                  onClick={() => {
+                    setAuthMode('signup');
+                    setAuthError(null);
+                  }}
+                >
+                  회원가입
+                </button>
+              </div>
+
+              <form className="auth-form" onSubmit={(event) => void handleAuthSubmit(event)}>
                 <Field
                   label="이메일"
-                  value={authMode === 'signup' ? signupEmail : loginEmail}
-                  onChange={authMode === 'signup' ? setSignupEmail : setLoginEmail}
+                  value={authEmail}
+                  onChange={setAuthEmail}
                   type="email"
                   autoComplete="email"
                   placeholder="you@example.com"
                 />
+
                 <Field
                   label="비밀번호"
-                  value={authMode === 'signup' ? signupPassword : loginPassword}
-                  onChange={authMode === 'signup' ? setSignupPassword : setLoginPassword}
+                  value={authPassword}
+                  onChange={setAuthPassword}
                   type="password"
                   autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
-                  placeholder="9자 이상, 영문+숫자+특수문자"
-                  note={authMode === 'signup' ? PASSWORD_POLICY_HINT : '가입한 비밀번호를 입력하세요.'}
+                  placeholder="비밀번호 입력"
+                  note={authMode === 'signup' ? PASSWORD_POLICY_HINT : undefined}
                 />
 
                 {authMode === 'signup' ? (
-                  <div className="policy-grid">
-                    <PolicyRule label="9자 이상" passed={signupPolicy.minLength} />
-                    <PolicyRule label="영문 포함" passed={signupPolicy.hasLetter} />
-                    <PolicyRule label="숫자 포함" passed={signupPolicy.hasNumber} />
-                    <PolicyRule label="특수문자 포함" passed={signupPolicy.hasSpecial} />
-                  </div>
-                ) : null}
+                  <ul className="policy-list">
+                    <PolicyRule label="9자 이상" passed={passwordPolicy.minLength} />
+                    <PolicyRule label="영문 포함" passed={passwordPolicy.hasLetter} />
+                    <PolicyRule label="숫자 포함" passed={passwordPolicy.hasNumber} />
+                    <PolicyRule label="특수문자 포함" passed={passwordPolicy.hasSpecial} />
+                  </ul>
+                ) : (
+                  <p className="auth-helper">기존 계정으로 바로 로그인하면 분석을 이어갈 수 있습니다.</p>
+                )}
 
-                <button
-                  className="primary-btn"
-                  type="submit"
-                  disabled={busy === 'signup' || busy === 'login' || (authMode === 'signup' && !signupPolicy.valid)}
-                >
-                  {busy === 'signup' ? '가입 처리 중...' : busy === 'login' ? '로그인 처리 중...' : authMode === 'signup' ? '회원가입' : '로그인'}
-                </button>
+                {authError ? <div className="error-banner">{authError}</div> : null}
+
+                <div className="auth-actions">
+                  <button
+                    className="auth-btn auth-btn-solid auth-submit"
+                    disabled={authBusy || !authEmail.trim() || !authPassword.trim() || (authMode === 'signup' && !passwordPolicy.valid)}
+                    type="submit"
+                  >
+                    {authBusy ? '처리 중...' : authMode === 'login' ? '로그인' : '회원가입'}
+                  </button>
+                  <button
+                    className="auth-btn auth-btn-ghost"
+                    disabled={!pendingAnalysis || !canUseGuest}
+                    onClick={() => void handleGuestContinue()}
+                    type="button"
+                  >
+                    {canUseGuest ? `게스트로 계속 (${guestSession.guestRemaining}회 남음)` : '게스트 횟수 소진'}
+                  </button>
+                  <button className="auth-close" onClick={closeAuthModal} type="button">
+                    닫기
+                  </button>
+                </div>
               </form>
-
-              <div className={`status-banner status-banner-${statusTone}`}>
-                <strong>{statusTone === 'success' ? 'Ready' : statusTone === 'danger' ? '주의' : '상태'}</strong>
-                <p>{statusMessage}</p>
-              </div>
-            </article>
-
-            <article className="panel">
-              <div className="panel-head">
-                <div>
-                  <p className="panel-kicker">Session</p>
-                  <h3 className="panel-title">세션 / 엔드포인트</h3>
-                  <p className="panel-subtitle">계정, 토큰, health check, 저장된 endpoint를 함께 관리합니다.</p>
-                </div>
-                <Pill tone={session ? 'success' : 'neutral'}>{session ? 'signed in' : 'guest'}</Pill>
-              </div>
-
-              <Field
-                label="Auth API Base URL"
-                value={authBaseUrlInput}
-                onChange={setAuthBaseUrlInput}
-                placeholder="http://localhost:3001"
-                note="회원가입 / 로그인 / 세션 복원에 사용되는 주소입니다."
-              />
-
-              <div className="button-row">
-                <button className="secondary-btn" type="button" onClick={handleSaveEndpoint} disabled={!endpointDirty}>
-                  저장
-                </button>
-                <button className="ghost-btn" type="button" onClick={handleResetEndpoint}>
-                  초기화
-                </button>
-                <button className="ghost-btn" type="button" onClick={handleHealthCheck} disabled={busy === 'health'}>
-                  {busy === 'health' ? '확인 중...' : 'Health'}
-                </button>
-              </div>
-
-              {session ? (
-                <div className="session-card">
-                  <div className="session-grid">
-                    <div className="session-cell">
-                      <span className="session-key">User</span>
-                      <strong className="session-value">{session.user.email}</strong>
-                    </div>
-                    <div className="session-cell">
-                      <span className="session-key">Token</span>
-                      <div className="session-token-row">
-                        <code className="session-token">{formatTokenPreview(session.token)}</code>
-                        <button
-                          className="copy-btn"
-                          type="button"
-                          onClick={() => {
-                            void navigator.clipboard?.writeText(session.token);
-                            setStatusTone('success');
-                            setStatusMessage('토큰을 클립보드에 복사했습니다.');
-                          }}
-                        >
-                          copy
-                        </button>
-                      </div>
-                    </div>
-                    <div className="session-cell">
-                      <span className="session-key">Issued</span>
-                      <strong className="session-value">{formatIssuedAt(session.issuedAt)}</strong>
-                    </div>
-                    <div className="session-cell">
-                      <span className="session-key">Expires</span>
-                      <strong className="session-value">
-                        {session.expiresIn > 0 ? `${Math.round(session.expiresIn / 3600)}h` : 'unknown'}
-                      </strong>
-                    </div>
-                  </div>
-                  <div className="session-actions">
-                    <Pill tone="neutral">{session.tokenType}</Pill>
-                    <button className="ghost-btn" type="button" onClick={handleLogout}>
-                      로그아웃
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="empty-state">
-                  <h4 className="empty-state-title">세션이 아직 없습니다.</h4>
-                  <p className="empty-state-copy">
-                    회원가입 또는 로그인 후 저장된 토큰을 이용해 세션이 자동 복원됩니다.
-                  </p>
-                </div>
-              )}
-            </article>
-
-            <article className="panel">
-              <div className="panel-head">
-                <div>
-                  <p className="panel-kicker">Pipeline</p>
-                  <h3 className="panel-title">멀티에이전트 레일</h3>
-                  <p className="panel-subtitle">현재 6단계 구조를 한눈에 확인할 수 있습니다.</p>
-                </div>
-                <Pill tone={analysisResult ? 'success' : 'neutral'}>{analysisResult ? '완료' : '대기'}</Pill>
-              </div>
-
-              <div className="pipeline-list">
-                {pipelineStatus.map(({ stage, status }) => (
-                  <StageRow key={stage.id} stage={stage} status={status} />
-                ))}
-              </div>
-            </article>
-
-            <article className="panel">
-              <div className="panel-head">
-                <div>
-                  <p className="panel-kicker">Ops</p>
-                  <h3 className="panel-title">연결 정보</h3>
-                  <p className="panel-subtitle">DB, 분석 API, OCR, 크롤러 슬롯을 붙이기 위한 기준점입니다.</p>
-                </div>
-              </div>
-
-              <div className="ops-grid">
-                <div className="ops-item">
-                  <span className="ops-item-label">Auth</span>
-                  <strong className="ops-item-value">{authBaseUrl}</strong>
-                </div>
-                <div className="ops-item">
-                  <span className="ops-item-label">Analysis</span>
-                  <strong className="ops-item-value">{analysisBaseUrl}</strong>
-                </div>
-                <div className="ops-item">
-                  <span className="ops-item-label">DB</span>
-                  <strong className="ops-item-value">PostgreSQL / Docker</strong>
-                </div>
-                <div className="ops-item">
-                  <span className="ops-item-label">Crawler</span>
-                  <strong className="ops-item-value">Link slot ready</strong>
-                </div>
-              </div>
-            </article>
-
-            <article className="panel">
-              <div className="panel-head">
-                <div>
-                  <p className="panel-kicker">History</p>
-                  <h3 className="panel-title">최근 분석</h3>
-                  <p className="panel-subtitle">로그인한 사용자 기준으로 저장된 최근 케이스입니다.</p>
-                </div>
-                <Pill tone={historyItems.length > 0 ? 'success' : 'neutral'}>
-                  {historyLoading ? '불러오는 중' : `${historyItems.length}건`}
-                </Pill>
-              </div>
-
-              {historyItems.length > 0 ? (
-                <div className="result-list">
-                  {historyItems.map((item) => (
-                    <article className="result-list-item" key={item.caseId}>
-                      <div className="result-list-bullet" />
-                      <div>
-                        <strong>{item.title}</strong>
-                        <p>
-                          {item.inputMode} · 위험도 {item.riskLevel || 0} ·{' '}
-                          {new Date(item.createdAt).toLocaleString('ko-KR')}
-                        </p>
-                        <span>{item.summary}</span>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <div className="empty-state">
-                  <h4 className="empty-state-title">저장된 분석이 아직 없습니다.</h4>
-                  <p className="empty-state-copy">
-                    로그인 후 분석을 실행하면 이 영역에 최근 케이스가 누적됩니다.
-                  </p>
-                </div>
-              )}
-            </article>
-          </aside>
-        </section>
-      </main>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -5,10 +5,11 @@ import type { AuthConfig } from "../auth/config.js";
 import type { AuthService } from "../auth/service.js";
 import { ingestLink } from "../ingest/index.js";
 import type { AnalysisConfig } from "./config.js";
-import type { AnalysisStore } from "./store.js";
+import type { AnalysisStore, GuestUsageResult } from "./store.js";
 
 interface HttpError extends Error {
   status?: number;
+  guestUsage?: GuestUsageResult;
 }
 
 interface AnalyzePayload {
@@ -20,6 +21,7 @@ interface AnalyzePayload {
   image_base64?: string;
   image_name?: string;
   image_mime_type?: string;
+  guest_id?: string;
 }
 
 function jsonResponse(
@@ -33,7 +35,7 @@ function jsonResponse(
     "content-type": "application/json; charset=utf-8",
     "content-length": String(Buffer.byteLength(payload)),
     "access-control-allow-origin": config.corsOrigin,
-    "access-control-allow-headers": "content-type, authorization",
+    "access-control-allow-headers": "content-type, authorization, x-guest-id",
     "access-control-allow-methods": "GET,POST,OPTIONS"
   });
   res.end(status === 204 ? undefined : payload);
@@ -97,6 +99,22 @@ function requireString(value: unknown, message: string): string {
   return normalized;
 }
 
+function requireGuestId(value: unknown): string {
+  const candidate = Array.isArray(value) ? value[0] : value;
+  const normalized = String(candidate ?? "").trim();
+  if (!normalized) {
+    const error = new Error("guest_id is required for guest analysis.") as HttpError;
+    error.status = 422;
+    throw error;
+  }
+  if (normalized.length > 128) {
+    const error = new Error("guest_id is too long.") as HttpError;
+    error.status = 422;
+    throw error;
+  }
+  return normalized;
+}
+
 function inferTitle(payload: AnalyzePayload, inputMode: "text" | "image" | "link"): string {
   const title = String(payload.title ?? "").trim();
   if (title) {
@@ -119,6 +137,15 @@ async function runAnalysisBridge(
   // @ts-expect-error Legacy runtime pipeline is still implemented in .mjs.
   const module = await import("../orchestrator/run-analysis.mjs");
   return module.runAnalysis(request, options) as Promise<Record<string, unknown>>;
+}
+
+function formatGuestUsage(usage: GuestUsageResult): Record<string, unknown> {
+  return {
+    guest_id: usage.guestId,
+    used: usage.usageCount,
+    limit: usage.limit,
+    remaining: usage.remaining
+  };
 }
 
 export function createAnalysisHandler(
@@ -160,20 +187,18 @@ export function createAnalysisHandler(
     }
 
     if (req.method === "POST" && pathname === "/api/analyze") {
-      try {
-        const token = extractBearerToken(req.headers.authorization);
-        if (!token) {
-          const error = new Error("Unauthorized.") as HttpError;
-          error.status = 401;
-          throw error;
-        }
+      let claims: Awaited<ReturnType<AuthService["verifyToken"]>> | null = null;
+      let guestUsage: GuestUsageResult | null = null;
 
-        const claims = await authService.verifyToken(token);
+      try {
         const payload = (await readJsonBody(req, analysisConfig.requestBodyLimit)) as AnalyzePayload;
+        const token = extractBearerToken(req.headers.authorization);
         const inputMode = payload.input_mode ?? "text";
         const contextType = String(payload.context_type ?? process.env.DEFAULT_CONTEXT_TYPE ?? "community");
         const requestId = `case-${randomUUID()}`;
         const title = inferTitle(payload, inputMode);
+        const isAuthenticated = Boolean(token);
+        const guestId = isAuthenticated ? "" : requireGuestId(req.headers["x-guest-id"] ?? payload.guest_id);
 
         let request: Record<string, unknown>;
         let sourceKind: "manual" | "ocr" | "crawl";
@@ -186,11 +211,25 @@ export function createAnalysisHandler(
         if (inputMode === "link") {
           const url = requireString(payload.url, "url field is required for link analysis.");
           const linkNote = String(payload.text ?? "").trim();
+          if (isAuthenticated) {
+            claims = await authService.verifyToken(String(token));
+          } else {
+            guestUsage = await store.consumeGuestAnalysis(guestId, 3);
+            if (!guestUsage.allowed) {
+              jsonResponse(res, authConfig, 429, {
+                error: "비로그인 사용자는 분석을 3회까지만 사용할 수 있습니다.",
+                guest_usage: formatGuestUsage(guestUsage),
+                guest_remaining: guestUsage.remaining
+              });
+              return true;
+            }
+          }
+
           const ingested = await ingestLink(
             {
               url,
               requestId,
-              userId: claims.sub,
+              userId: isAuthenticated ? claims?.sub : undefined,
               contextType,
               timeoutMs: analysisConfig.crawlTimeoutMs,
               maxBytes: analysisConfig.crawlMaxBytes,
@@ -247,6 +286,19 @@ export function createAnalysisHandler(
           };
           sourceKind = "ocr";
           metadata.ocr_note = contentText;
+          if (isAuthenticated) {
+            claims = await authService.verifyToken(String(token));
+          } else {
+            guestUsage = await store.consumeGuestAnalysis(guestId, 3);
+            if (!guestUsage.allowed) {
+              jsonResponse(res, authConfig, 429, {
+                error: "비로그인 사용자는 분석을 3회까지만 사용할 수 있습니다.",
+                guest_usage: formatGuestUsage(guestUsage),
+                guest_remaining: guestUsage.remaining
+              });
+              return true;
+            }
+          }
         } else {
           contentText = requireString(payload.text, "text field is required for text analysis.");
           request = {
@@ -256,6 +308,19 @@ export function createAnalysisHandler(
             text: contentText
           };
           sourceKind = "manual";
+          if (isAuthenticated) {
+            claims = await authService.verifyToken(String(token));
+          } else {
+            guestUsage = await store.consumeGuestAnalysis(guestId, 3);
+            if (!guestUsage.allowed) {
+              jsonResponse(res, authConfig, 429, {
+                error: "비로그인 사용자는 분석을 3회까지만 사용할 수 있습니다.",
+                guest_usage: formatGuestUsage(guestUsage),
+                guest_remaining: guestUsage.remaining
+              });
+              return true;
+            }
+          }
         }
 
         const result = await runAnalysisBridge(request, {
@@ -264,31 +329,55 @@ export function createAnalysisHandler(
         const ocr = (result.ocr ?? {}) as { raw_text?: string };
         const timeline = Array.isArray(result.timeline) ? result.timeline : [];
 
-        const saved = await store.saveAnalysis({
-          userId: Number(claims.sub),
-          inputMode,
-          contextType,
-          title,
-          sourceKind,
-          sourceUrl,
-          originalFilename,
-          mimeType,
-          contentText: typeof ocr.raw_text === "string" && ocr.raw_text.trim() ? ocr.raw_text : contentText,
-          metadata,
-          providerMode: analysisConfig.providerMode,
-          result: result as Record<string, unknown>,
-          timeline
-        });
+        if (isAuthenticated && claims) {
+          const saved = await store.saveAnalysis({
+            userId: Number(claims.sub),
+            inputMode,
+            contextType,
+            title,
+            sourceKind,
+            sourceUrl,
+            originalFilename,
+            mimeType,
+            contentText: typeof ocr.raw_text === "string" && ocr.raw_text.trim() ? ocr.raw_text : contentText,
+            metadata,
+            providerMode: analysisConfig.providerMode,
+            result: result as Record<string, unknown>,
+            timeline
+          });
+
+          jsonResponse(res, authConfig, 200, {
+            ...result,
+            case_id: saved.caseId,
+            run_id: saved.runId
+          });
+          return true;
+        }
 
         jsonResponse(res, authConfig, 200, {
           ...result,
-          case_id: saved.caseId,
-          run_id: saved.runId
+          ...(guestUsage
+            ? {
+                guest_usage: formatGuestUsage(guestUsage),
+                guest_remaining: guestUsage.remaining
+              }
+            : {})
         });
       } catch (error) {
         const err = error as HttpError;
         jsonResponse(res, authConfig, err.status ?? 500, {
-          error: err.message || "Internal server error."
+          error: err.message || "Internal server error.",
+          ...(guestUsage
+            ? {
+                guest_usage: formatGuestUsage(guestUsage),
+                guest_remaining: guestUsage.remaining
+              }
+            : err.guestUsage
+              ? {
+                  guest_usage: formatGuestUsage(err.guestUsage),
+                  guest_remaining: err.guestUsage.remaining
+                }
+              : {})
         });
       }
       return true;

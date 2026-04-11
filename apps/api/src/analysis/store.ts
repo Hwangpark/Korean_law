@@ -16,6 +16,10 @@ interface HistoryRow {
   result_json: Record<string, unknown>;
 }
 
+interface GuestUsageRow {
+  usage_count: number;
+}
+
 export interface SaveAnalysisInput {
   userId: number;
   inputMode: "text" | "image" | "link";
@@ -44,10 +48,19 @@ export interface AnalysisHistoryItem {
   canSue: boolean;
 }
 
+export interface GuestUsageResult {
+  guestId: string;
+  usageCount: number;
+  limit: number;
+  remaining: number;
+  allowed: boolean;
+}
+
 export interface AnalysisStore {
   ensureSchema(): Promise<void>;
   saveAnalysis(input: SaveAnalysisInput): Promise<{ caseId: string; runId: string }>;
   listHistory(userId: number, limit?: number): Promise<AnalysisHistoryItem[]>;
+  consumeGuestAnalysis(guestId: string, limit?: number): Promise<GuestUsageResult>;
 }
 
 function stableHash(value: string): string {
@@ -107,6 +120,14 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
     await db.query(`
       CREATE INDEX IF NOT EXISTS analysis_runs_user_created_idx
       ON analysis_runs (user_id, created_at DESC)
+    `);
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS guest_analysis_usage (
+        guest_id TEXT PRIMARY KEY,
+        usage_count INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
     `);
   }
 
@@ -223,9 +244,56 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
     });
   }
 
+  async function consumeGuestAnalysis(guestId: string, limit = 3): Promise<GuestUsageResult> {
+    const normalizedGuestId = String(guestId ?? "").trim();
+    if (!normalizedGuestId) {
+      throw new Error("guest_id is required for guest analysis.");
+    }
+
+    const allowedResult = await db.query<GuestUsageRow>(
+      `
+        INSERT INTO guest_analysis_usage (guest_id, usage_count)
+        VALUES ($1, 1)
+        ON CONFLICT (guest_id)
+        DO UPDATE SET
+          usage_count = guest_analysis_usage.usage_count + 1,
+          updated_at = NOW()
+        WHERE guest_analysis_usage.usage_count < $2
+        RETURNING usage_count
+      `,
+      [normalizedGuestId, limit]
+    );
+
+    const allowedUsageCount = Number(allowedResult.rows[0]?.usage_count ?? 0);
+    if (allowedUsageCount > 0) {
+      return {
+        guestId: normalizedGuestId,
+        usageCount: allowedUsageCount,
+        limit,
+        remaining: Math.max(limit - allowedUsageCount, 0),
+        allowed: true
+      };
+    }
+
+    const currentResult = await db.query<GuestUsageRow>(
+      "SELECT usage_count FROM guest_analysis_usage WHERE guest_id = $1 LIMIT 1",
+      [normalizedGuestId]
+    );
+    const currentUsageCount = Number(currentResult.rows[0]?.usage_count ?? limit);
+
+    return {
+      guestId: normalizedGuestId,
+      usageCount: currentUsageCount,
+      limit,
+      remaining: 0,
+      allowed: false
+    };
+  }
+
   return {
     ensureSchema,
     saveAnalysis,
-    listHistory
+    listHistory,
+    consumeGuestAnalysis
   };
 }
