@@ -39,6 +39,23 @@ function parseIntOr(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function requireInProduction(
+  value: string | undefined,
+  fallback: string,
+  name: string,
+  nodeEnv: string
+): string {
+  if (value) {
+    return value;
+  }
+
+  if (nodeEnv === "production") {
+    throw new Error(`${name} must be set in production.`);
+  }
+
+  return fallback;
+}
+
 function parseDatabaseUrl(databaseUrl: string): DatabaseConfig {
   const url = new URL(databaseUrl);
   if (!["postgres:", "postgresql:"].includes(url.protocol)) {
@@ -55,6 +72,7 @@ function parseDatabaseUrl(databaseUrl: string): DatabaseConfig {
 }
 
 export function loadAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig {
+  const nodeEnv = env.NODE_ENV || "development";
   const database = env.DATABASE_URL
     ? parseDatabaseUrl(env.DATABASE_URL)
     : {
@@ -62,20 +80,30 @@ export function loadAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig
         port: parseIntOr(env.PGPORT || env.POSTGRES_PORT, 5432),
         database: env.PGDATABASE || env.POSTGRES_DB || "koreanlaw",
         user: env.PGUSER || env.POSTGRES_USER || "park",
-        password: env.PGPASSWORD || env.POSTGRES_PASSWORD || "park8948"
+        password: requireInProduction(
+          env.PGPASSWORD || env.POSTGRES_PASSWORD,
+          "park8948",
+          "POSTGRES_PASSWORD",
+          nodeEnv
+        )
       };
 
   return {
     port: parseIntOr(env.AUTH_PORT || env.API_PORT, 3001),
-    corsOrigin: env.AUTH_CORS_ORIGIN || "*",
+    corsOrigin: env.AUTH_CORS_ORIGIN || (nodeEnv === "development" ? "http://localhost:5173" : "*"),
     jwt: {
-      secret: env.AUTH_JWT_SECRET || "koreanlaw-dev-jwt-secret",
+      secret: requireInProduction(
+        env.AUTH_JWT_SECRET,
+        "koreanlaw-dev-jwt-secret",
+        "AUTH_JWT_SECRET",
+        nodeEnv
+      ),
       issuer: env.AUTH_JWT_ISSUER || "koreanlaw-auth",
       audience: env.AUTH_JWT_AUDIENCE || "koreanlaw-app",
       expiresInSeconds: parseIntOr(env.AUTH_JWT_TTL_SECONDS, 60 * 60 * 24 * 7)
     },
     database,
-    nodeEnv: env.NODE_ENV || "development",
+    nodeEnv,
     requestBodyLimit: parseIntOr(env.AUTH_BODY_LIMIT_BYTES, 1_048_576),
     requestIdPrefix: env.AUTH_REQUEST_PREFIX || `auth-${crypto.randomBytes(4).toString("hex")}`
   };

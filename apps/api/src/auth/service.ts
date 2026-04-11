@@ -146,7 +146,12 @@ export function createAuthService(config: AuthConfig): AuthService {
 
   async function verifyTokenValue(token: string): Promise<JwtPayload> {
     try {
-      return verifyJwt(token, config.jwt.secret);
+      return verifyJwt(token, {
+        secret: config.jwt.secret,
+        issuer: config.jwt.issuer,
+        audience: config.jwt.audience,
+        type: "access"
+      });
     } catch (error) {
       const authError = error instanceof Error ? error : new Error("Unauthorized.");
       (authError as Error & { status?: number }).status = 401;

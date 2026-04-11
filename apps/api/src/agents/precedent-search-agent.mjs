@@ -1,9 +1,24 @@
+import { searchPrecedentsByQueries } from "../lib/law-open-api.mjs";
 import { loadRepoJson } from "../lib/load-json.mjs";
 
 export async function runPrecedentSearchAgent(classificationResult, options = {}) {
   const provider = options.providerMode ?? "mock";
-  const precedents = await loadRepoJson("fixtures/providers/precedents.json");
   const topics = new Set(classificationResult.issues.map((issue) => issue.type));
+
+  if (provider === "live") {
+    const queries = classificationResult.issues.flatMap((issue) => [
+      issue.type,
+      ...issue.law_search_queries
+    ]);
+    const precedents = await searchPrecedentsByQueries(queries, [...topics], 3);
+
+    return {
+      provider,
+      precedents
+    };
+  }
+
+  const precedents = await loadRepoJson("fixtures/providers/precedents.json");
 
   const matches = precedents
     .map((precedent) => {

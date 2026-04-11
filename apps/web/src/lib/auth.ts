@@ -23,6 +23,29 @@ export type HealthResponse = {
   time: string;
 };
 
+export type AnalyzeCasePayload = {
+  title?: string;
+  context_type: string;
+  input_mode: 'text' | 'image' | 'link';
+  text?: string;
+  url?: string;
+  image_base64?: string;
+  image_name?: string;
+  image_mime_type?: string;
+};
+
+export type AnalysisHistoryItem = {
+  caseId: string;
+  inputMode: string;
+  contextType: string;
+  title: string;
+  sourceUrl: string | null;
+  createdAt: string;
+  summary: string;
+  riskLevel: number;
+  canSue: boolean;
+};
+
 export type PasswordPolicyState = {
   minLength: boolean;
   hasLetter: boolean;
@@ -209,4 +232,28 @@ export function checkHealth(baseUrl: string) {
   return requestJson<HealthResponse>(`${normalizeBaseUrl(baseUrl)}/health`, {
     method: 'GET',
   });
+}
+
+export async function analyzeCase(baseUrl: string, token: string, payload: AnalyzeCasePayload) {
+  return requestJson<Record<string, unknown>>(`${normalizeBaseUrl(baseUrl)}/api/analyze`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchHistory(baseUrl: string, token: string) {
+  const response = await requestJson<{ items?: AnalysisHistoryItem[] }>(
+    `${normalizeBaseUrl(baseUrl)}/api/history`,
+    {
+      method: 'GET',
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  return Array.isArray(response.items) ? response.items : [];
 }
