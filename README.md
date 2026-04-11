@@ -1,236 +1,121 @@
-# ⚖️ Korean Law Analyzer
+# KoreanLaw
 
-> **커뮤니티 글, 게임 채팅, 일상 대화 캡처 한 장으로 법적 분석 끝.**  
-> 국가법령정보 공개 API + 멀티에이전트 시스템으로 관련 법령과 유사 판례를 자동 검색하고, 고소 가능 여부 및 예상 처벌을 안내합니다.
+한국어 텍스트, 캡처 이미지, 링크를 입력받아 법적 쟁점, 관련 법령, 유사 판례, 참고용 분석 결과를 생성하는 멀티에이전트 법률 분석 작업대입니다.
 
----
+현재 브랜치 `codex` 기준 구현 범위:
+- React + TypeScript 웹 UI
+- 회원가입 / 로그인 / 세션 복원
+- Docker PostgreSQL 개발 스택
+- 6-agent 분석 파이프라인
+- 이미지 OCR (`tesseract.js`)
+- 국가법령정보 공동활용 Open API live 연동
+- 링크 크롤링 + SSRF / `robots.txt` 기본 방어
+- 사용자별 분석 히스토리 저장
 
-## 🔍 이런 상황에 씁니다
+## Runtime Agents
 
-| 상황 | 예시 |
-|------|------|
-| 커뮤니티 익명글 | 허위사실 유포, 명예훼손, 악플 |
-| 게임 내 채팅 | 협박, 욕설, 게임 사기 |
-| 메신저 대화 | 스토킹, 성희롱, 공갈 |
-| 온라인 거래 | 사기, 환불 거부 |
+1. Orchestrator
+2. OCR Agent
+3. Classifier Agent
+4. Law Search Agent
+5. Precedent Agent
+6. Legal Analysis Agent
 
-캡처 이미지 또는 텍스트를 붙여넣으면 → **"이게 죄가 되나요?"** 에 답해줍니다.
+## Stack
 
----
+- Web: React 18 + Vite + TypeScript
+- API: Node + TypeScript (`tsx`) + existing mock/live agent modules
+- DB: PostgreSQL 16 (Docker)
+- OCR: `tesseract.js`
+- Ingestion: built-in HTML fetch / normalize pipeline
+- Auth: JWT + PostgreSQL
 
-## 🏗️ 시스템 구조
+## Local Run
 
-```
-사용자 (회원가입 / 로그인)
-          │
-          ▼
-  ┌──────────────┐
-  │  Auth Layer  │  ← JWT 인증
-  └──────┬───────┘
-         │
-         ▼
-사용자 (이미지 / 텍스트 업로드)
-         │
-         ▼
-  ┌───────────────┐
-  │  Orchestrator │  ← 전체 흐름 조율
-  └──────┬────────┘
-         │
-  ┌──────▼──────┐
-  │  OCR Agent  │  ← 이미지에서 텍스트 추출 + 발화자 구분
-  └──────┬──────┘
-         │
-  ┌──────▼──────────┐
-  │ Classifier Agent│  ← 명예훼손 / 협박 / 사기 등 유형 분류
-  └──────┬──────────┘
-         │
-    ┌────┴─────┐  (병렬 실행)
-    ▼          ▼
-┌─────────┐ ┌──────────────────┐
-│  Law    │ │ Precedent Search │
-│ Search  │ │     Agent        │
-│ Agent   │ │  (유사 판례 검색) │
-└────┬────┘ └────────┬─────────┘
-     └───────┬───────┘
-             ▼
-  ┌──────────────────────────────────┐
-  │        Legal Analysis Agent      │
-  │  고소 가능 여부 + 예상 처벌 판단  │
-  │  + 비전문가 언어로 결과 포맷 변환 │
-  └──────────────────────────────────┘
-             │
-             ▼
-  ┌──────────────────────────────────┐
-  │     PostgreSQL (Docker)          │
-  │  분석 결과 저장 / 히스토리 조회   │
-  └──────────────────────────────────┘
-             │
-             ▼
-       결과 화면 출력
+1. `.env.local`을 준비합니다.
+2. 의존성을 설치합니다.
+3. Docker 스택을 올립니다.
+
+```bash
+npm install
+npm --prefix apps/web install
+npm run stack:up
 ```
 
----
+기본 접속 주소:
+- Web: `http://localhost:5173`
+- API: `http://localhost:3001`
+- Adminer: `http://localhost:8080`
+- PostgreSQL: `localhost:5433` in local dev
 
-## 🤖 에이전트 역할 요약
+## Required Env
 
-| 에이전트 | 역할 |
-|---------|------|
-| **Orchestrator** | 파이프라인 전체 조율, 병렬 실행 관리, SSE 스트리밍 |
-| **OCR Agent** | Vision 모델로 이미지→텍스트, 발화자 A/B 분리, UI 요소 제거 |
-| **Classifier Agent** | 위법 행위 유형 식별 → 법령 카테고리 매핑 |
-| **Law Search Agent** | 국가법령정보 API → 관련 조문, 처벌 조항, 친고죄 여부 |
-| **Precedent Agent** | 판례 API → 유사 사건 판결 결과 및 법원 판단 요약 |
-| **Legal Analysis Agent** | 법령 + 판례 종합 → 고소 가능성, 예상 형량, 증거 수집 안내 + 일반인 언어로 결과 포맷 변환 |
+`.env.example`를 참고하고, 실제 값은 `.env.local`에 둡니다.
 
----
+중요 항목:
+- `LAW_PROVIDER=live`
+- `LAW_API_KEY=<your-open-law-oc>`
+- `LAW_API_BASE_URL=https://www.law.go.kr/DRF/`
+- `DATABASE_URL=postgresql://...`
+- `AUTH_JWT_SECRET=...`
 
-## 👤 인증 구조
+## API
 
-```
-회원가입  →  이메일 + 비밀번호 → bcrypt 해싱 → PostgreSQL 저장
-로그인    →  검증 후 JWT 발급 (Access Token + Refresh Token)
-API 요청  →  Authorization: Bearer {token} 헤더 검증
-```
+### Auth
+- `POST /auth/signup`
+- `POST /auth/login`
+- `GET /auth/me`
+- `GET /health`
 
-**DB 테이블 (예정)**
+### Analysis
+- `POST /api/analyze`
+- `GET /api/history`
 
-| 테이블 | 내용 |
-|--------|------|
-| `users` | id, email, password_hash, created_at |
-| `analysis_history` | id, user_id, input_text, result_json, created_at |
+`/api/analyze`는 로그인된 사용자 토큰이 필요합니다.
 
-로그인한 사용자는 본인의 분석 히스토리를 조회할 수 있습니다.
+입력 모드:
+- `text`
+- `image`
+- `link`
 
----
+## Analysis Request Shape
 
-## 📡 데이터 소스
-
-**[국가법령정보 공개 API](https://open.law.go.kr/LSO/openApi/guideList.do)**
-
-```
-법령 목록 검색  →  OC100101
-법령 본문 조회  →  OC100103
-판례 목록 검색  →  OC100201
-판례 본문 조회  →  OC100203
-행정규칙 검색   →  OC100301
-```
-
----
-
-## 🖥️ 결과 화면 구성
-
-```
-┌────────────────────────────────────────────────────┐
-│  위험도  ████████░░  Level 4 / 5  (고위험)          │
-├────────────────────────────────────────────────────┤
-│  ✅ 사이버 명예훼손 성립 가능                        │
-│     └ 근거: 정보통신망법 제70조 제1항               │
-│     └ 예상: 3년 이하 징역 / 3천만원 이하 벌금       │
-├────────────────────────────────────────────────────┤
-│  📁 유사 판례                                       │
-│     2023도1234 | 대법원 | 유죄 | 벌금 300만원       │
-├────────────────────────────────────────────────────┤
-│  📋 권장 행동                                       │
-│     □ 게시글 URL + 스크린샷 보존                    │
-│     □ 사이버수사대 고소장 제출                      │
-│     □ 임시처분 신청 (IP 추적)                       │
-└────────────────────────────────────────────────────┘
+```json
+{
+  "title": "메신저 협박 검토",
+  "context_type": "messenger",
+  "input_mode": "image",
+  "text": "반복 협박 정황이 보입니다.",
+  "image_base64": "data:image/png;base64,...",
+  "image_name": "capture.png",
+  "image_mime_type": "image/png"
+}
 ```
 
----
+링크 입력 예시:
 
-## 🛠️ 기술 스택
-
-| 영역 | 기술 |
-|------|------|
-| Frontend | Next.js 14+, Tailwind CSS |
-| Backend | FastAPI 또는 Next.js API Routes |
-| 인증 | JWT (Access + Refresh Token) |
-| 데이터베이스 | PostgreSQL (Docker) |
-| 실시간 통신 | Server-Sent Events (SSE) |
-| 작업 큐 | Redis |
-| 법령 데이터 | 국가법령정보 공개 API |
-
----
-
-## 🐳 Docker 구성
-
-```yaml
-services:
-  db:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: koreanlaw
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
-volumes:
-  postgres_data:
+```json
+{
+  "title": "게시글 링크 검토",
+  "context_type": "community",
+  "input_mode": "link",
+  "url": "https://example.com/post/123",
+  "text": "댓글 흐름과 삭제 여부를 같이 보고 싶습니다."
+}
 ```
 
----
+## Checks
 
-## 🗺️ 개발 로드맵
-
-- **Phase 1 — 인증 + MVP**
-  - [ ] 회원가입 / 로그인 (JWT)
-  - [ ] PostgreSQL Docker 세팅
-  - [ ] 텍스트 직접 입력 지원
-  - [ ] Classifier + Law Search Agent
-  - [ ] 기본 결과 화면
-
-- **Phase 2 — 판례 연동**
-  - [ ] Precedent Search Agent
-  - [ ] Legal Analysis Agent
-  - [ ] SSE 실시간 진행 표시
-  - [ ] 분석 히스토리 저장 / 조회
-
-- **Phase 3 — 이미지 + 고도화**
-  - [ ] OCR Agent (이미지 업로드)
-  - [ ] 위험도 시각화
-  - [ ] 모바일 최적화
-
----
-
-## ⚙️ 환경 변수
-
-```env
-# DB
-DB_USER=
-DB_PASSWORD=
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=koreanlaw
-
-# JWT
-JWT_SECRET=
-JWT_EXPIRES_IN=1h
-REFRESH_TOKEN_EXPIRES_IN=7d
-
-# 국가법령정보 API
-LAW_API_KEY=          # open.law.go.kr 발급 대기 중
-LAW_API_BASE_URL=https://open.law.go.kr/LSO/openApi/
+```bash
+npm run check
+npm run build:web
+npm run test:auth
+npm run test:mock
 ```
 
----
+## Notes
 
-## ⚠️ 면책 고지
-
-> 본 서비스는 법률 정보 제공을 목적으로 하며, **법적 효력이 없습니다.**  
-> 구체적인 법률 조언은 반드시 변호사에게 문의하시기 바랍니다.
-
----
-
-## 📎 참고
-
-- [국가법령정보 공개 API 가이드](https://open.law.go.kr/LSO/openApi/guideList.do)
-- [시스템 상세 설계 → ARCHITECTURE.md](./ARCHITECTURE.md)
+- 결과는 참고용이며 법적 효력이 없습니다.
+- 이미지 원본은 DB에 저장하지 않고 OCR 텍스트와 메타데이터만 저장합니다.
+- 링크 크롤링은 `http/https`만 허용하며, localhost / private IP / 특수 주소를 차단합니다.
+- `robots.txt`가 404가 아닌 방식으로 확인 실패하면 차단합니다.

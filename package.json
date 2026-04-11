@@ -24,8 +24,10 @@
     "check": "npm run test:mock && npm run test:policy && npm run typecheck && npm run web:check"
   },
   "dependencies": {
+    "cheerio": "^1.1.2",
     "dotenv": "^17.2.3",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "tesseract.js": "^6.0.1"
   },
   "devDependencies": {
     "@types/node": "^24.7.2",

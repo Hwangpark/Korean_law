@@ -23,6 +23,35 @@ export type HealthResponse = {
   time: string;
 };
 
+export type AnalyzeCasePayload = {
+  title?: string;
+  context_type: string;
+  input_mode: 'text' | 'image' | 'link';
+  text?: string;
+  url?: string;
+  image_base64?: string;
+  image_name?: string;
+  image_mime_type?: string;
+  guest_id?: string;
+};
+
+export type AnalysisHistoryItem = {
+  caseId: string;
+  inputMode: string;
+  contextType: string;
+  title: string;
+  sourceUrl: string | null;
+  createdAt: string;
+  summary: string;
+  riskLevel: number;
+  canSue: boolean;
+};
+
+export type GuestSession = {
+  guestId: string;
+  guestRemaining: number;
+};
+
 export type PasswordPolicyState = {
   minLength: boolean;
   hasLetter: boolean;
@@ -49,6 +78,8 @@ export const PASSWORD_POLICY_HINT =
 
 const AUTH_BASE_URL_STORAGE_KEY = 'korean-law.auth.base-url';
 const AUTH_TOKEN_STORAGE_KEY = 'korean-law.auth.token';
+const GUEST_SESSION_STORAGE_KEY = 'korean-law.guest.session';
+const DEFAULT_GUEST_LIMIT = 3;
 const LETTER_PATTERN = /[A-Za-z]/;
 const NUMBER_PATTERN = /\d/;
 const SPECIAL_PATTERN = /[!-/:-@[-`{-~]/;
@@ -95,6 +126,79 @@ export function saveStoredToken(token: string) {
 export function clearStoredToken() {
   try {
     window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures in privacy-restricted browsers.
+  }
+}
+
+function createGuestId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return `guest-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function normalizeGuestSession(payload: unknown): GuestSession | null {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const guestId =
+    typeof (payload as { guestId?: unknown }).guestId === 'string'
+      ? (payload as { guestId: string }).guestId
+      : typeof (payload as { guest_id?: unknown }).guest_id === 'string'
+        ? (payload as { guest_id: string }).guest_id
+        : null;
+
+  const guestRemainingValue =
+    typeof (payload as { guestRemaining?: unknown }).guestRemaining === 'number'
+      ? (payload as { guestRemaining: number }).guestRemaining
+      : typeof (payload as { guest_remaining?: unknown }).guest_remaining === 'number'
+        ? (payload as { guest_remaining: number }).guest_remaining
+        : null;
+
+  if (!guestId || guestRemainingValue === null || Number.isNaN(guestRemainingValue)) {
+    return null;
+  }
+
+  return {
+    guestId,
+    guestRemaining: Math.max(0, Math.min(DEFAULT_GUEST_LIMIT, Math.floor(guestRemainingValue))),
+  };
+}
+
+export function loadStoredGuestSession() {
+  try {
+    const raw = window.localStorage.getItem(GUEST_SESSION_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    return normalizeGuestSession(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+export function getInitialGuestSession() {
+  return loadStoredGuestSession() ?? {
+    guestId: createGuestId(),
+    guestRemaining: DEFAULT_GUEST_LIMIT,
+  };
+}
+
+export function saveGuestSession(session: GuestSession) {
+  try {
+    window.localStorage.setItem(GUEST_SESSION_STORAGE_KEY, JSON.stringify(session));
+  } catch {
+    // Ignore storage failures in privacy-restricted browsers.
+  }
+}
+
+export function clearStoredGuestSession() {
+  try {
+    window.localStorage.removeItem(GUEST_SESSION_STORAGE_KEY);
   } catch {
     // Ignore storage failures in privacy-restricted browsers.
   }
@@ -209,4 +313,31 @@ export function checkHealth(baseUrl: string) {
   return requestJson<HealthResponse>(`${normalizeBaseUrl(baseUrl)}/health`, {
     method: 'GET',
   });
+}
+
+export async function analyzeCase(baseUrl: string, token: string | null | undefined, payload: AnalyzeCasePayload) {
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers.authorization = `Bearer ${token}`;
+  }
+
+  return requestJson<Record<string, unknown>>(`${normalizeBaseUrl(baseUrl)}/api/analyze`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchHistory(baseUrl: string, token: string) {
+  const response = await requestJson<{ items?: AnalysisHistoryItem[] }>(
+    `${normalizeBaseUrl(baseUrl)}/api/history`,
+    {
+      method: 'GET',
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  return Array.isArray(response.items) ? response.items : [];
 }

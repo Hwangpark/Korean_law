@@ -103,8 +103,9 @@ export async function runLegalAnalysisAgent(
     "반복성 입증을 위한 추가 캡처",
     "상대방 식별 가능 정보"
   ];
-  const disclaimer =
-    "본 분석은 mock 데이터에 기반한 참고용 초안이며 법적 효력이 없습니다. 구체적인 법률 자문은 변호사와 상담해야 합니다.";
+  const disclaimer = providerMode === "live"
+    ? "본 분석은 공식 법령 API와 판례 데이터를 참고한 안내이며 법적 효력은 없습니다. 구체적인 법률 자문은 변호사와 상담해야 합니다."
+    : "본 분석은 mock 데이터에 기반한 참고용 초안이며 법적 효력이 없습니다. 구체적인 법률 자문은 변호사와 상담해야 합니다.";
   const summary = buildSummary(charges);
 
   return {

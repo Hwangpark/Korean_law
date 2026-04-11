@@ -1,5 +1,9 @@
+import { createRequire } from "node:module";
+
 import { loadJson } from "../lib/load-json.mjs";
 import { fromRepo } from "../lib/paths.mjs";
+
+const require = createRequire(import.meta.url);
 
 function splitTextToUtterances(text) {
   return text
@@ -24,17 +28,33 @@ function splitTextToUtterances(text) {
     });
 }
 
+async function recognizeImageFromBase64(base64) {
+  const Tesseract = require("tesseract.js");
+  const buffer = Buffer.from(base64, "base64");
+  const result = await Tesseract.recognize(buffer, "kor+eng", {
+    logger: () => {}
+  });
+  return String(result?.data?.text ?? "").trim();
+}
+
 export async function runOcrAgent(request) {
   if (request.input_type === "image") {
     if (request.ocr_fixture) {
       return loadJson(fromRepo(request.ocr_fixture));
     }
 
+    const ocrText = request.image_base64
+      ? await recognizeImageFromBase64(String(request.image_base64))
+      : "";
+    const rawText = [ocrText, String(request.text ?? "").trim()].filter(Boolean).join("\n\n");
+
     return {
       source_type: request.context_type ?? "unknown",
-      utterances: [],
-      raw_text: "",
-      note: "OCR API 키가 없어 fixture 기반 OCR만 지원합니다."
+      utterances: splitTextToUtterances(rawText),
+      raw_text: rawText,
+      note: ocrText
+        ? "tesseract.js 기반 OCR 결과를 사용했습니다."
+        : "이미지 OCR 결과가 비어 있어 사용자가 남긴 메모만 분석합니다."
     };
   }
 
