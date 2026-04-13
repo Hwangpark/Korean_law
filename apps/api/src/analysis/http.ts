@@ -158,6 +158,23 @@ function formatGuestUsage(usage: GuestUsageResult): Record<string, unknown> {
   };
 }
 
+function parseReferenceRoute(pathname: string): { kind: "law" | "precedent"; id: string } | null {
+  const match = /^\/api\/references\/([^/]+)\/(.+)$/.exec(pathname);
+  if (!match) {
+    return null;
+  }
+
+  const kind = match[1];
+  if (kind !== "law" && kind !== "precedent") {
+    return null;
+  }
+
+  return {
+    kind,
+    id: decodeURIComponent(match[2] ?? "")
+  };
+}
+
 export function createAnalysisHandler(
   authService: AuthService,
   authConfig: AuthConfig,
@@ -170,7 +187,13 @@ export function createAnalysisHandler(
   ): Promise<boolean> {
     const pathname = requestPath(req);
 
-    if (req.method === "OPTIONS" && (pathname === "/api/analyze" || pathname === "/api/history")) {
+    if (
+      req.method === "OPTIONS" &&
+      (pathname === "/api/analyze" ||
+        pathname === "/api/history" ||
+        pathname === "/api/references/search" ||
+        pathname.startsWith("/api/references/"))
+    ) {
       jsonResponse(res, authConfig, 204, null, req);
       return true;
     }
@@ -194,6 +217,49 @@ export function createAnalysisHandler(
         }, req);
       }
       return true;
+    }
+
+    if (req.method === "GET" && pathname === "/api/references/search") {
+      try {
+        const searchUrl = new URL(req.url ?? "/api/references/search", "http://localhost");
+        const query = String(searchUrl.searchParams.get("q") ?? "").trim();
+        if (!query) {
+          const error = new Error("q query parameter is required.") as HttpError;
+          error.status = 422;
+          throw error;
+        }
+
+        const items = await store.searchReferences(query, 12);
+        jsonResponse(res, authConfig, 200, { items }, req);
+      } catch (error) {
+        const err = error as HttpError;
+        jsonResponse(res, authConfig, err.status ?? 500, {
+          error: err.message || "Internal server error."
+        }, req);
+      }
+      return true;
+    }
+
+    if (req.method === "GET") {
+      const referenceRoute = parseReferenceRoute(pathname);
+      if (referenceRoute) {
+        try {
+          const item = await store.getReferenceByKindAndId(referenceRoute.kind, referenceRoute.id);
+          if (!item) {
+            const error = new Error("Reference not found.") as HttpError;
+            error.status = 404;
+            throw error;
+          }
+
+          jsonResponse(res, authConfig, 200, { item }, req);
+        } catch (error) {
+          const err = error as HttpError;
+          jsonResponse(res, authConfig, err.status ?? 500, {
+            error: err.message || "Internal server error."
+          }, req);
+        }
+        return true;
+      }
     }
 
     if (req.method === "POST" && pathname === "/api/analyze") {
@@ -359,13 +425,24 @@ export function createAnalysisHandler(
           jsonResponse(res, authConfig, 200, {
             ...result,
             case_id: saved.caseId,
-            run_id: saved.runId
+            run_id: saved.runId,
+            reference_library: {
+              items: saved.referenceLibrary
+            }
           }, req);
           return true;
         }
 
+        const referenceLibrary = await store.saveReferenceLibrary({
+          providerMode: analysisConfig.providerMode,
+          result: result as Record<string, unknown>
+        });
+
         jsonResponse(res, authConfig, 200, {
           ...result,
+          reference_library: {
+            items: referenceLibrary
+          },
           ...(guestUsage
             ? {
                 guest_usage: formatGuestUsage(guestUsage),
