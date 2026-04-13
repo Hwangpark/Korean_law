@@ -24,19 +24,29 @@ interface AnalyzePayload {
   guest_id?: string;
 }
 
+function resolveOrigin(config: AuthConfig, req: http.IncomingMessage): string {
+  const origin = req.headers.origin ?? "";
+  const allowed = config.corsOrigins;
+  if (allowed.includes("*") || allowed.includes(origin)) return origin || allowed[0];
+  return allowed[0];
+}
+
 function jsonResponse(
   res: http.ServerResponse,
   config: AuthConfig,
   status: number,
-  body: unknown
+  body: unknown,
+  req?: http.IncomingMessage
 ): void {
   const payload = status === 204 ? "" : JSON.stringify(body);
+  const origin = req ? resolveOrigin(config, req) : config.corsOrigins[0];
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "content-length": String(Buffer.byteLength(payload)),
-    "access-control-allow-origin": config.corsOrigin,
+    "access-control-allow-origin": origin,
     "access-control-allow-headers": "content-type, authorization, x-guest-id",
-    "access-control-allow-methods": "GET,POST,OPTIONS"
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "vary": "Origin"
   });
   res.end(status === 204 ? undefined : payload);
 }
@@ -161,7 +171,7 @@ export function createAnalysisHandler(
     const pathname = requestPath(req);
 
     if (req.method === "OPTIONS" && (pathname === "/api/analyze" || pathname === "/api/history")) {
-      jsonResponse(res, authConfig, 204, null);
+      jsonResponse(res, authConfig, 204, null, req);
       return true;
     }
 
@@ -176,12 +186,12 @@ export function createAnalysisHandler(
 
         const claims = await authService.verifyToken(token);
         const items = await store.listHistory(Number(claims.sub));
-        jsonResponse(res, authConfig, 200, { items });
+        jsonResponse(res, authConfig, 200, { items }, req);
       } catch (error) {
         const err = error as HttpError;
         jsonResponse(res, authConfig, err.status ?? 500, {
           error: err.message || "Internal server error."
-        });
+        }, req);
       }
       return true;
     }
@@ -220,7 +230,7 @@ export function createAnalysisHandler(
                 error: "비로그인 사용자는 분석을 3회까지만 사용할 수 있습니다.",
                 guest_usage: formatGuestUsage(guestUsage),
                 guest_remaining: guestUsage.remaining
-              });
+              }, req);
               return true;
             }
           }
@@ -295,7 +305,7 @@ export function createAnalysisHandler(
                 error: "비로그인 사용자는 분석을 3회까지만 사용할 수 있습니다.",
                 guest_usage: formatGuestUsage(guestUsage),
                 guest_remaining: guestUsage.remaining
-              });
+              }, req);
               return true;
             }
           }
@@ -317,7 +327,7 @@ export function createAnalysisHandler(
                 error: "비로그인 사용자는 분석을 3회까지만 사용할 수 있습니다.",
                 guest_usage: formatGuestUsage(guestUsage),
                 guest_remaining: guestUsage.remaining
-              });
+              }, req);
               return true;
             }
           }
@@ -350,7 +360,7 @@ export function createAnalysisHandler(
             ...result,
             case_id: saved.caseId,
             run_id: saved.runId
-          });
+          }, req);
           return true;
         }
 
@@ -362,7 +372,7 @@ export function createAnalysisHandler(
                 guest_remaining: guestUsage.remaining
               }
             : {})
-        });
+        }, req);
       } catch (error) {
         const err = error as HttpError;
         jsonResponse(res, authConfig, err.status ?? 500, {
@@ -378,7 +388,7 @@ export function createAnalysisHandler(
                   guest_remaining: err.guestUsage.remaining
                 }
               : {})
-        });
+        }, req);
       }
       return true;
     }

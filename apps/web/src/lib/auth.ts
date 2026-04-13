@@ -280,7 +280,14 @@ function normalizeMeResponse(payload: RawMeResponse): MeResponse {
   };
 }
 
-export async function signup(baseUrl: string, payload: { email: string; password: string }) {
+export async function requestEmailCode(baseUrl: string, email: string): Promise<{ message: string }> {
+  return requestJson<{ message: string }>(`${normalizeBaseUrl(baseUrl)}/auth/request-email-code`, {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function signup(baseUrl: string, payload: { email: string; password: string; verification_code: string }) {
   const response = await requestJson<RawAuthResponse>(`${normalizeBaseUrl(baseUrl)}/auth/signup`, {
     method: 'POST',
     body: JSON.stringify(payload),

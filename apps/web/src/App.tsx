@@ -3,7 +3,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import './styles.css';
 import {
   DEFAULT_AUTH_BASE_URL,
-  PASSWORD_POLICY_HINT,
+  requestEmailCode,
   analyzeCase,
   clearStoredToken,
   evaluatePasswordPolicy,
@@ -24,7 +24,7 @@ const AUTH_BASE_URL = getInitialAuthBaseUrl();
 const ANALYSIS_BASE_URL = import.meta.env.VITE_ANALYSIS_BASE_URL ?? AUTH_BASE_URL ?? DEFAULT_AUTH_BASE_URL;
 
 type ContextType = 'community' | 'game_chat' | 'messenger' | 'other';
-type View = 'input' | 'analyzing' | 'results';
+type View = 'input' | 'analyzing' | 'results' | 'signup' | 'login';
 type AuthMode = 'login' | 'signup';
 
 type Charge = {
@@ -120,38 +120,6 @@ function ProbabilityPill({ prob }: { prob: 'high' | 'medium' | 'low' }) {
   return <span className={`prob-pill ${cls}`}>{label}</span>;
 }
 
-function Field({
-  label,
-  value,
-  onChange,
-  type,
-  autoComplete,
-  placeholder,
-  note,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  type: string;
-  autoComplete?: string;
-  placeholder?: string;
-  note?: string;
-}) {
-  return (
-    <label className="auth-field">
-      <span className="auth-field-label">{label}</span>
-      {note ? <span className="auth-field-note">{note}</span> : null}
-      <input
-        className="input auth-input"
-        type={type}
-        autoComplete={autoComplete}
-        placeholder={placeholder}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    </label>
-  );
-}
 
 function PolicyRule({ label, passed }: { label: string; passed: boolean }) {
   return (
@@ -173,17 +141,35 @@ export default function App() {
   const [session, setSession] = useState<{ user: AuthUser; token: string } | null>(null);
   const [guestSession, setGuestSession] = useState<GuestSession>(() => getInitialGuestSession());
 
-  const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [authMode, setAuthMode] = useState<AuthMode>('login');
+  const [authMode] = useState<AuthMode>('login');
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [pendingAnalysis, setPendingAnalysis] = useState<PendingAnalysis | null>(null);
 
+  const [signupName, setSignupName] = useState('');
+  const [signupBirthday, setSignupBirthday] = useState('');
+  const [signupGender, setSignupGender] = useState<'male' | 'female' | null>(null);
+  const [signupNationality, setSignupNationality] = useState<'korean' | 'foreign'>('korean');
+  const [signupConfirmPassword, setSignupConfirmPassword] = useState('');
+  const [showSignupPassword, setShowSignupPassword] = useState(false);
+
+  // email verification flow
+  const [verifyStep, setVerifyStep] = useState<'idle' | 'sending' | 'sent' | 'verified'>('idle');
+  const [verifyCode, setVerifyCode] = useState('');
+  const [verifyTimer, setVerifyTimer] = useState(0);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+
   useEffect(() => {
     saveGuestSession(guestSession);
   }, [guestSession]);
+
+  useEffect(() => {
+    if (verifyTimer <= 0) return;
+    const id = window.setTimeout(() => setVerifyTimer((t) => t - 1), 1000);
+    return () => window.clearTimeout(id);
+  }, [verifyTimer]);
 
   useEffect(() => {
     const token = loadStoredToken();
@@ -214,36 +200,14 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!authModalOpen) {
-      return;
-    }
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setAuthModalOpen(false);
-        setAuthError(null);
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [authModalOpen]);
-
   const passwordPolicy = evaluatePasswordPolicy(authPassword);
   const canUseGuest = guestSession.guestRemaining > 0;
 
-  function openAuthModal(mode: AuthMode) {
-    setAuthMode(mode);
-    setAuthError(null);
-    setAuthModalOpen(true);
-  }
-
-  function closeAuthModal() {
-    setAuthModalOpen(false);
-    setAuthBusy(false);
-    setAuthError(null);
+  function openLoginPage(errorMessage?: string) {
+    setAuthError(errorMessage ?? null);
+    setAuthEmail('');
     setAuthPassword('');
+    setView('login');
   }
 
   function handleLogout() {
@@ -256,7 +220,6 @@ export default function App() {
     setAnalysisError(null);
     setAgentProgress([]);
     setView('analyzing');
-    setAuthModalOpen(false);
     setAuthError(null);
 
     AGENT_STEPS.forEach((step, index) => {
@@ -308,10 +271,7 @@ export default function App() {
         clearStoredToken();
         setSession(null);
         setPendingAnalysis(snapshot);
-        setAuthMode('login');
-        setAuthError('세션이 만료되었습니다. 다시 로그인하세요.');
-        setAuthModalOpen(true);
-        setView('input');
+        openLoginPage('세션이 만료되었습니다. 다시 로그인하세요.');
         return;
       }
 
@@ -333,54 +293,34 @@ export default function App() {
     }
 
     setPendingAnalysis(snapshot);
-    setAuthMode('login');
-    setAuthError(
-      canUseGuest
-        ? null
-        : '게스트 무료 3회를 모두 사용했습니다. 로그인 또는 회원가입이 필요합니다.',
-    );
-    setAuthModalOpen(true);
+    openLoginPage(canUseGuest ? undefined : '게스트 무료 3회를 모두 사용했습니다. 로그인 또는 회원가입이 필요합니다.');
   }
 
-  async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleLoginPageSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setAuthBusy(true);
     setAuthError(null);
-
-    const payload = {
-      email: authEmail.trim(),
-      password: authPassword,
-    };
-
     try {
-      const response: AuthResponse =
-        authMode === 'signup'
-          ? await signup(AUTH_BASE_URL, payload)
-          : await login(AUTH_BASE_URL, payload);
-
+      const response: AuthResponse = await login(AUTH_BASE_URL, { email: authEmail.trim(), password: authPassword });
       saveStoredToken(response.token);
       setSession({ user: response.user, token: response.token });
       setAuthBusy(false);
-      setAuthModalOpen(false);
       setAuthPassword('');
-
       if (pendingAnalysis) {
         const snapshot = pendingAnalysis;
         setPendingAnalysis(null);
         await runAnalysis(snapshot, response.token);
+      } else {
+        setView('input');
       }
     } catch (err) {
       setAuthBusy(false);
-      setAuthError(err instanceof Error ? err.message : '인증 처리 중 오류가 발생했습니다.');
+      setAuthError(err instanceof Error ? err.message : '로그인 중 오류가 발생했습니다.');
     }
   }
 
   async function handleGuestContinue() {
-    if (!pendingAnalysis || guestSession.guestRemaining <= 0) {
-      setAuthError('게스트 무료 횟수가 남아 있지 않습니다. 로그인 또는 회원가입이 필요합니다.');
-      return;
-    }
-
+    if (!pendingAnalysis || guestSession.guestRemaining <= 0) return;
     const snapshot = pendingAnalysis;
     setPendingAnalysis(null);
     await runAnalysis(snapshot, null);
@@ -394,6 +334,66 @@ export default function App() {
     setView('input');
   }
 
+  function openSignupPage() {
+    setAuthError(null);
+    setAuthEmail('');
+    setAuthPassword('');
+    setSignupName('');
+    setSignupBirthday('');
+    setSignupGender(null);
+    setSignupNationality('korean');
+    setSignupConfirmPassword('');
+    setShowSignupPassword(false);
+    setVerifyStep('idle');
+    setVerifyCode('');
+    setVerifyTimer(0);
+    setVerifyError(null);
+    setView('signup');
+  }
+
+  async function handleRequestCode() {
+    const email = authEmail.trim();
+    if (!email) return;
+    setVerifyStep('sending');
+    setVerifyError(null);
+    try {
+      await requestEmailCode(AUTH_BASE_URL, email);
+      setVerifyStep('sent');
+      setVerifyTimer(180); // 3분 카운트다운
+    } catch (err) {
+      setVerifyStep('idle');
+      setVerifyError(err instanceof Error ? err.message : '코드 발송에 실패했습니다.');
+    }
+  }
+
+  async function handleSignupPageSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (verifyStep !== 'verified') {
+      setAuthError('이메일 인증을 먼저 완료해주세요.');
+      return;
+    }
+    if (authPassword !== signupConfirmPassword) {
+      setAuthError('비밀번호가 일치하지 않습니다.');
+      return;
+    }
+    setAuthBusy(true);
+    setAuthError(null);
+    try {
+      const response = await signup(AUTH_BASE_URL, {
+        email: authEmail.trim(),
+        password: authPassword,
+        verification_code: verifyCode,
+      });
+      saveStoredToken(response.token);
+      setSession({ user: response.user, token: response.token });
+      setAuthBusy(false);
+      setView('input');
+    } catch (err) {
+      setAuthBusy(false);
+      setAuthError(err instanceof Error ? err.message : '회원가입 중 오류가 발생했습니다.');
+    }
+  }
+
   const headerActions = (
     <div className="auth-controls">
       {!session ? (
@@ -401,10 +401,10 @@ export default function App() {
           <span className={`guest-pill ${guestSession.guestRemaining > 0 ? 'guest-pill-ready' : 'guest-pill-empty'}`}>
             게스트 {guestSession.guestRemaining}/3
           </span>
-          <button className="auth-btn auth-btn-ghost" onClick={() => openAuthModal('login')} type="button">
+          <button className="auth-btn auth-btn-ghost" onClick={() => openLoginPage()} type="button">
             로그인
           </button>
-          <button className="auth-btn auth-btn-solid" onClick={() => openAuthModal('signup')} type="button">
+          <button className="auth-btn auth-btn-solid" onClick={openSignupPage} type="button">
             회원가입
           </button>
         </>
@@ -669,6 +669,273 @@ export default function App() {
     </main>
   ) : null;
 
+  const signupPageView = (
+    <div className="signup-page">
+      <div className="signup-container">
+        <div className="signup-logo">
+          <span className="signup-logo-icon">⚖</span>
+          <span className="signup-logo-text">KoreanLaw</span>
+        </div>
+
+        <form className="signup-card" onSubmit={(e) => void handleSignupPageSubmit(e)}>
+
+          {/* ── Step 1: 이메일 인증 ── */}
+          <div className="signup-field-group">
+            <div className="signup-field">
+              <span className="signup-field-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+              </span>
+              <input
+                className="signup-input"
+                type="email"
+                placeholder="이메일 (아이디)"
+                value={authEmail}
+                onChange={(e) => { setAuthEmail(e.target.value); setVerifyStep('idle'); setVerifyError(null); }}
+                autoComplete="email"
+                disabled={verifyStep === 'verified'}
+                required
+              />
+              {verifyStep === 'verified' ? (
+                <span className="signup-verified-badge">✓ 인증완료</span>
+              ) : (
+                <button
+                  type="button"
+                  className="signup-code-btn"
+                  disabled={!authEmail.trim() || verifyStep === 'sending'}
+                  onClick={() => void handleRequestCode()}
+                >
+                  {verifyStep === 'sending' ? '발송중...' : verifyStep === 'sent' ? '재전송' : '인증 요청'}
+                </button>
+              )}
+            </div>
+
+            {(verifyStep === 'sent') && (
+              <div className="signup-field signup-code-row">
+                <span className="signup-field-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M8 6V4a2 2 0 0 1 4 0v2"/></svg>
+                </span>
+                <input
+                  className="signup-input"
+                  type="text"
+                  placeholder="인증 코드 6자리"
+                  value={verifyCode}
+                  onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  maxLength={6}
+                  autoComplete="one-time-code"
+                />
+                {verifyTimer > 0 && (
+                  <span className="signup-code-timer">
+                    {String(Math.floor(verifyTimer / 60)).padStart(2, '0')}:{String(verifyTimer % 60).padStart(2, '0')}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="signup-code-btn"
+                  disabled={verifyCode.length !== 6}
+                  onClick={() => {
+                    // client-side: pass code into signup — verified on server
+                    setVerifyStep('verified');
+                    setVerifyTimer(0);
+                    setVerifyError(null);
+                  }}
+                >
+                  인증 확인
+                </button>
+              </div>
+            )}
+          </div>
+
+          {verifyError && <div className="signup-error">{verifyError}</div>}
+
+          {/* ── Step 2: 비밀번호 ── */}
+          <div className={`signup-field-group ${verifyStep !== 'verified' ? 'signup-group-locked' : ''}`}>
+            <div className="signup-field">
+              <span className="signup-field-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </span>
+              <input
+                className="signup-input"
+                type={showSignupPassword ? 'text' : 'password'}
+                placeholder="비밀번호"
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                autoComplete="new-password"
+                disabled={verifyStep !== 'verified'}
+                required
+              />
+              <button type="button" className="signup-eye" disabled={verifyStep !== 'verified'} onClick={() => setShowSignupPassword((v) => !v)}>
+                {showSignupPassword
+                  ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                  : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                }
+              </button>
+            </div>
+            <div className="signup-field">
+              <span className="signup-field-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </span>
+              <input
+                className="signup-input"
+                type="password"
+                placeholder="비밀번호 재입력"
+                value={signupConfirmPassword}
+                onChange={(e) => setSignupConfirmPassword(e.target.value)}
+                autoComplete="new-password"
+                disabled={verifyStep !== 'verified'}
+                required
+              />
+            </div>
+          </div>
+
+          {authPassword.length > 0 && verifyStep === 'verified' && (
+            <ul className="signup-policy-list">
+              <PolicyRule label="9자 이상" passed={passwordPolicy.minLength} />
+              <PolicyRule label="영문 포함" passed={passwordPolicy.hasLetter} />
+              <PolicyRule label="숫자 포함" passed={passwordPolicy.hasNumber} />
+              <PolicyRule label="특수문자 포함" passed={passwordPolicy.hasSpecial} />
+            </ul>
+          )}
+
+          {/* ── Step 3: 개인 정보 ── */}
+          <div className={`signup-field-group ${verifyStep !== 'verified' ? 'signup-group-locked' : ''}`}>
+            <div className="signup-field">
+              <span className="signup-field-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              </span>
+              <input
+                className="signup-input"
+                type="text"
+                placeholder="이름"
+                value={signupName}
+                onChange={(e) => setSignupName(e.target.value)}
+                disabled={verifyStep !== 'verified'}
+              />
+            </div>
+            <div className="signup-field">
+              <span className="signup-field-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              </span>
+              <input
+                className="signup-input"
+                type="text"
+                placeholder="생년월일 8자리 (예: 19901231)"
+                value={signupBirthday}
+                onChange={(e) => setSignupBirthday(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                maxLength={8}
+                disabled={verifyStep !== 'verified'}
+              />
+            </div>
+            <div className="signup-toggles-row">
+              <button type="button" className={`signup-toggle ${signupGender === 'male' ? 'signup-toggle-active' : ''}`} onClick={() => setSignupGender('male')} disabled={verifyStep !== 'verified'}>남</button>
+              <button type="button" className={`signup-toggle ${signupGender === 'female' ? 'signup-toggle-active' : ''}`} onClick={() => setSignupGender('female')} disabled={verifyStep !== 'verified'}>여</button>
+              <button type="button" className={`signup-toggle ${signupNationality === 'korean' ? 'signup-toggle-active' : ''}`} onClick={() => setSignupNationality('korean')} disabled={verifyStep !== 'verified'}>내국인</button>
+              <button type="button" className={`signup-toggle ${signupNationality === 'foreign' ? 'signup-toggle-active' : ''}`} onClick={() => setSignupNationality('foreign')} disabled={verifyStep !== 'verified'}>외국인</button>
+            </div>
+          </div>
+
+          {authError && <div className="signup-error">{authError}</div>}
+
+          <button
+            className="signup-submit"
+            type="submit"
+            disabled={authBusy || verifyStep !== 'verified' || !passwordPolicy.valid || authPassword !== signupConfirmPassword}
+          >
+            {authBusy ? '처리 중...' : '가입하기'}
+          </button>
+        </form>
+
+        <div className="signup-footer-links">
+          이미 계정이 있으신가요?&nbsp;
+          <button type="button" className="signup-link" onClick={() => openLoginPage()}>로그인</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const loginPageView = (
+    <div className="signup-page">
+      <div className="signup-container">
+        <div className="signup-logo">
+          <span className="signup-logo-icon">⚖</span>
+          <span className="signup-logo-text">KoreanLaw</span>
+        </div>
+
+        {pendingAnalysis && (
+          <div className="auth-page-notice">
+            로그인 후 분석이 자동으로 시작됩니다
+          </div>
+        )}
+
+        <form className="signup-card" onSubmit={(e) => void handleLoginPageSubmit(e)}>
+          <div className="signup-field-group">
+            <div className="signup-field">
+              <span className="signup-field-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+              </span>
+              <input
+                className="signup-input"
+                type="email"
+                placeholder="이메일"
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                autoComplete="email"
+                required
+              />
+            </div>
+            <div className="signup-field">
+              <span className="signup-field-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </span>
+              <input
+                className="signup-input"
+                type="password"
+                placeholder="비밀번호"
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                autoComplete="current-password"
+                required
+              />
+            </div>
+          </div>
+
+          {authError && <div className="signup-error">{authError}</div>}
+
+          <button
+            className="signup-submit"
+            type="submit"
+            disabled={authBusy || !authEmail.trim() || !authPassword.trim()}
+          >
+            {authBusy ? '처리 중...' : '로그인'}
+          </button>
+
+          {pendingAnalysis && canUseGuest && (
+            <button
+              className="signup-submit auth-guest-btn"
+              type="button"
+              onClick={() => void handleGuestContinue()}
+            >
+              게스트로 계속 ({guestSession.guestRemaining}회 남음)
+            </button>
+          )}
+        </form>
+
+        <div className="signup-footer-links">
+          계정이 없으신가요?&nbsp;
+          <button type="button" className="signup-link" onClick={openSignupPage}>회원가입</button>
+          {!pendingAnalysis && (
+            <>
+              &nbsp;·&nbsp;
+              <button type="button" className="signup-link" onClick={() => setView('input')}>돌아가기</button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (view === 'login') return loginPageView;
+  if (view === 'signup') return signupPageView;
+
   return (
     <div className="page">
       <header className="top-bar">
@@ -682,113 +949,6 @@ export default function App() {
       </header>
 
       {view === 'input' ? inputView : view === 'analyzing' ? analyzingView : resultsView}
-
-      {authModalOpen && (
-        <div className="modal-backdrop" onClick={closeAuthModal} role="presentation">
-          <div className="auth-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
-            <div className="auth-modal-aside">
-              <p className="auth-modal-kicker">계정 인증</p>
-              <h2 className="auth-modal-title">분석을 이어가려면 로그인하거나 게스트로 진행하세요</h2>
-              <p className="auth-modal-copy">
-                로그인하면 분석 이력과 세션 복원이 가능하고, 게스트는 총 3회까지 바로 사용할 수 있습니다.
-              </p>
-
-              <div className="auth-modal-stat">
-                <span>게스트 잔여</span>
-                <strong>{guestSession.guestRemaining}/3</strong>
-              </div>
-
-              <div className="auth-modal-note">
-                <span className="disclaimer-icon">ⓘ</span>
-                <p>
-                  비밀번호는 {PASSWORD_POLICY_HINT} 기준을 만족해야 합니다. 이메일 인증은 추후에 추가할 수
-                  있도록 현재는 제외했습니다.
-                </p>
-              </div>
-            </div>
-
-            <div className="auth-modal-panel">
-              <div className="auth-tabs" role="tablist" aria-label="인증 방식">
-                <button
-                  type="button"
-                  className={`auth-tab ${authMode === 'login' ? 'auth-tab-active' : ''}`}
-                  onClick={() => {
-                    setAuthMode('login');
-                    setAuthError(null);
-                  }}
-                >
-                  로그인
-                </button>
-                <button
-                  type="button"
-                  className={`auth-tab ${authMode === 'signup' ? 'auth-tab-active' : ''}`}
-                  onClick={() => {
-                    setAuthMode('signup');
-                    setAuthError(null);
-                  }}
-                >
-                  회원가입
-                </button>
-              </div>
-
-              <form className="auth-form" onSubmit={(event) => void handleAuthSubmit(event)}>
-                <Field
-                  label="이메일"
-                  value={authEmail}
-                  onChange={setAuthEmail}
-                  type="email"
-                  autoComplete="email"
-                  placeholder="you@example.com"
-                />
-
-                <Field
-                  label="비밀번호"
-                  value={authPassword}
-                  onChange={setAuthPassword}
-                  type="password"
-                  autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
-                  placeholder="비밀번호 입력"
-                  note={authMode === 'signup' ? PASSWORD_POLICY_HINT : undefined}
-                />
-
-                {authMode === 'signup' ? (
-                  <ul className="policy-list">
-                    <PolicyRule label="9자 이상" passed={passwordPolicy.minLength} />
-                    <PolicyRule label="영문 포함" passed={passwordPolicy.hasLetter} />
-                    <PolicyRule label="숫자 포함" passed={passwordPolicy.hasNumber} />
-                    <PolicyRule label="특수문자 포함" passed={passwordPolicy.hasSpecial} />
-                  </ul>
-                ) : (
-                  <p className="auth-helper">기존 계정으로 바로 로그인하면 분석을 이어갈 수 있습니다.</p>
-                )}
-
-                {authError ? <div className="error-banner">{authError}</div> : null}
-
-                <div className="auth-actions">
-                  <button
-                    className="auth-btn auth-btn-solid auth-submit"
-                    disabled={authBusy || !authEmail.trim() || !authPassword.trim() || (authMode === 'signup' && !passwordPolicy.valid)}
-                    type="submit"
-                  >
-                    {authBusy ? '처리 중...' : authMode === 'login' ? '로그인' : '회원가입'}
-                  </button>
-                  <button
-                    className="auth-btn auth-btn-ghost"
-                    disabled={!pendingAnalysis || !canUseGuest}
-                    onClick={() => void handleGuestContinue()}
-                    type="button"
-                  >
-                    {canUseGuest ? `게스트로 계속 (${guestSession.guestRemaining}회 남음)` : '게스트 횟수 소진'}
-                  </button>
-                  <button className="auth-close" onClick={closeAuthModal} type="button">
-                    닫기
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -24,11 +24,19 @@ export interface JwtConfig {
   expiresInSeconds: number;
 }
 
+export interface EmailConfig {
+  user: string;
+  appPassword: string;
+  enabled: boolean;
+  baseUrl: string;
+}
+
 export interface AuthConfig {
   port: number;
-  corsOrigin: string;
+  corsOrigins: string[];
   database: DatabaseConfig;
   jwt: JwtConfig;
+  email: EmailConfig;
   nodeEnv: string;
   requestBodyLimit: number;
   requestIdPrefix: string;
@@ -88,9 +96,16 @@ export function loadAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig
         )
       };
 
+  const port = parseIntOr(env.AUTH_PORT || env.API_PORT, 3001);
+  const gmailUser = env.GMAIL_USER || "minstock.official@gmail.com";
+  const gmailPass = env.GMAIL_APP_PASSWORD || "";
+
+  const corsOriginEnv = env.AUTH_CORS_ORIGIN || (nodeEnv === "development" ? "http://localhost:5173" : "*");
+  const corsOrigins = corsOriginEnv.split(",").map((s) => s.trim()).filter(Boolean);
+
   return {
-    port: parseIntOr(env.AUTH_PORT || env.API_PORT, 3001),
-    corsOrigin: env.AUTH_CORS_ORIGIN || (nodeEnv === "development" ? "http://localhost:5173" : "*"),
+    port,
+    corsOrigins,
     jwt: {
       secret: requireInProduction(
         env.AUTH_JWT_SECRET,
@@ -103,6 +118,12 @@ export function loadAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig
       expiresInSeconds: parseIntOr(env.AUTH_JWT_TTL_SECONDS, 60 * 60 * 24 * 7)
     },
     database,
+    email: {
+      user: gmailUser,
+      appPassword: gmailPass,
+      enabled: gmailPass.length > 0,
+      baseUrl: env.AUTH_PUBLIC_URL || `http://localhost:${port}`,
+    },
     nodeEnv,
     requestBodyLimit: parseIntOr(env.AUTH_BODY_LIMIT_BYTES, 1_048_576),
     requestIdPrefix: env.AUTH_REQUEST_PREFIX || `auth-${crypto.randomBytes(4).toString("hex")}`
