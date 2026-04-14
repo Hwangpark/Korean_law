@@ -71,6 +71,7 @@ POSTGRES_PORT=5433 npm run stack:up
 ## 로컬 세팅 순서
 
 1. `.env.example`를 참고해 루트 `.env.local` 값을 맞춘다.
+   메일 인증을 실제로 쓰려면 `GMAIL_USER`, `GMAIL_APP_PASSWORD`, `AUTH_PUBLIC_URL`도 함께 넣는다.
 2. `npm install`로 루트 의존성을 설치한다.
 3. `npm run db:up`로 PostgreSQL 컨테이너를 올린다.
 4. `npm run dev:api`로 TypeScript auth 서버를 실행한다.
@@ -114,3 +115,4 @@ npm run test:auth
 - 이 문서의 `park8948`은 PostgreSQL 로컬 개발 전용이다.
 - 공유 환경이나 운영 환경에서는 반드시 다른 비밀번호와 비밀 관리 체계를 써야 한다.
 - CSRF 보호가 강하게 걸린 form 기반 auth라면, smoke test를 그 계약에 맞게 한 단계 더 맞춰야 한다.
+- `GMAIL_APP_PASSWORD`가 비어 있으면 로컬 개발에서는 메일 대신 개발용 인증 코드가 응답으로 내려오도록 되어 있다.

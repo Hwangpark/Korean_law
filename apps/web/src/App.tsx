@@ -6,19 +6,25 @@ import {
   requestEmailCode,
   analyzeCase,
   clearStoredToken,
+  verifyEmailCode,
   evaluatePasswordPolicy,
   fetchMe,
   getInitialAuthBaseUrl,
   getInitialGuestSession,
   loadStoredToken,
   login,
-  saveGuestSession,
-  saveStoredToken,
-  signup,
-  type AuthResponse,
-  type AuthUser,
-  type GuestSession,
-} from './lib/auth';
+    saveGuestSession,
+    saveStoredToken,
+    signup,
+    verifyKeyword,
+    type AnalyzeCaseResponse,
+  type AnalysisLegalResult,
+  type AnalysisReferenceItem,
+    type AuthResponse,
+    type AuthUser,
+    type GuestSession,
+    type SignupPayload,
+  } from './lib/auth';
 
 const AUTH_BASE_URL = getInitialAuthBaseUrl();
 const ANALYSIS_BASE_URL = import.meta.env.VITE_ANALYSIS_BASE_URL ?? AUTH_BASE_URL ?? DEFAULT_AUTH_BASE_URL;
@@ -33,6 +39,10 @@ type Charge = {
   elements_met: string[];
   probability: 'high' | 'medium' | 'low';
   expected_penalty: string;
+  reference_library?: AnalysisReferenceItem[];
+  referenceLibrary?: AnalysisReferenceItem[];
+  references?: AnalysisReferenceItem[];
+  [key: string]: unknown;
 };
 
 type PrecedentCard = {
@@ -41,6 +51,22 @@ type PrecedentCard = {
   verdict: string;
   summary: string;
   similarity_score: number;
+  reference_library?: AnalysisReferenceItem[];
+  referenceLibrary?: AnalysisReferenceItem[];
+  references?: AnalysisReferenceItem[];
+  [key: string]: unknown;
+};
+
+type UserProfileContext = {
+  displayName?: string;
+  birthDate?: string;
+  gender?: string;
+  nationality?: string;
+  ageYears?: number;
+  ageBand?: string;
+  isMinor?: boolean;
+  legalNotes?: string[];
+  [key: string]: unknown;
 };
 
 type AnalysisResult = {
@@ -52,22 +78,199 @@ type AnalysisResult = {
   evidence_to_collect: string[];
   precedent_cards: PrecedentCard[];
   disclaimer: string;
+  reference_library?: AnalysisReferenceItem[];
+  law_reference_library?: AnalysisReferenceItem[];
+  precedent_reference_library?: AnalysisReferenceItem[];
+  profile_context?: UserProfileContext | null;
+  profile_considerations?: string[];
+  profile_guidance?: ProfileGuidance | null;
 };
 
-type AnalyzeResponse = {
-  legal_analysis?: AnalysisResult;
-  guest_id?: string;
-  guest_remaining?: number;
-  meta?: {
-    guest_id?: string;
-    guest_remaining?: number;
-  };
+type AnalysisLegalResultWithProfile = AnalysisLegalResult & {
+  user_profile?: UserProfileContext | null;
+  profile_context?: UserProfileContext | null;
+  profile_considerations?: string[];
+  age_band?: string;
+  age_years?: number;
+  is_minor?: boolean;
+};
+
+type ProfileGuidance = {
+  title: string;
+  summary: string;
+  items: string[];
+  note?: string;
 };
 
 type PendingAnalysis = {
   text: string;
   contextType: ContextType;
 };
+
+type PendingKeyword = {
+  keyword: string;
+  contextType: ContextType;
+};
+
+type DetailReference = {
+  kind?: string;
+  title: string;
+  summary: string;
+  url?: string;
+  href?: string;
+  subtitle?: string;
+};
+
+type DetailPanelData = {
+  eyebrow: string;
+  title: string;
+  summary: string;
+  metadata: Array<{ label: string; value: string }>;
+  highlights: string[];
+  references: DetailReference[];
+};
+
+function normalizeProfileContext(value: unknown): UserProfileContext | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const legalNotes = toTextList(value.legalNotes ?? value.legal_notes);
+
+  const context: UserProfileContext = {
+    displayName: firstText(value.displayName, value.display_name, value.name),
+    birthDate: firstText(value.birthDate, value.birth_date),
+    gender: firstText(value.gender),
+    nationality: firstText(value.nationality),
+    ageYears:
+      typeof value.ageYears === 'number'
+        ? value.ageYears
+        : typeof value.age_years === 'number'
+          ? value.age_years
+          : undefined,
+    ageBand: firstText(value.ageBand, value.age_band),
+    isMinor:
+      typeof value.isMinor === 'boolean'
+        ? value.isMinor
+        : typeof value.is_minor === 'boolean'
+          ? value.is_minor
+          : undefined,
+    legalNotes: legalNotes.length > 0 ? legalNotes : undefined,
+  };
+
+  if (
+    !context.displayName &&
+    !context.birthDate &&
+    !context.gender &&
+    !context.nationality &&
+    context.ageYears === undefined &&
+    !context.ageBand &&
+    context.isMinor === undefined &&
+    (!context.legalNotes || context.legalNotes.length === 0)
+  ) {
+    return null;
+  }
+
+  return context;
+}
+
+function formatProfileNationality(value: string) {
+  if (value === 'korean') {
+    return '내국인';
+  }
+  if (value === 'foreign') {
+    return '외국인';
+  }
+  return value;
+}
+
+function formatProfileGender(value: string) {
+  if (value === 'male') {
+    return '남성';
+  }
+  if (value === 'female') {
+    return '여성';
+  }
+  return value;
+}
+
+function formatProfileAgeBand(value: string) {
+  if (value === 'child') {
+    return '18세 미만';
+  }
+  if (value === 'minor') {
+    return '미성년';
+  }
+  if (value === 'adult') {
+    return '성인';
+  }
+  return value;
+}
+
+function normalizeProfileGuidance(value: unknown): ProfileGuidance | null {
+  if (typeof value === 'string') {
+    const summary = value.trim();
+    if (!summary) {
+      return null;
+    }
+
+    return {
+      title: '프로필 기반 안내',
+      summary,
+      items: [],
+    };
+  }
+
+  if (Array.isArray(value)) {
+    const items = toTextList(value);
+    if (items.length === 0) {
+      return null;
+    }
+
+    return {
+      title: '프로필 기반 안내',
+      summary: items[0],
+      items,
+    };
+  }
+
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const items = toTextList(value.items ?? value.notes ?? value.legalNotes ?? value.legal_notes);
+  const profileContext = normalizeProfileContext(value);
+  const summary = firstText(
+    value.summary,
+    value.description,
+    value.note,
+    profileContext?.ageBand,
+    typeof profileContext?.ageYears === 'number' ? `${profileContext.ageYears}세 기준으로 검토하세요.` : '',
+    profileContext?.isMinor ? '미성년자 관련 절차를 우선 확인하세요.' : '',
+  );
+  const title = firstText(value.title, value.heading, value.label) || '프로필 기반 안내';
+
+  if (!summary && items.length === 0 && !profileContext) {
+    return null;
+  }
+
+  return {
+    title,
+    summary: summary || '프로필 정보를 반영한 참고 안내입니다.',
+    items:
+      items.length > 0
+        ? items
+        : profileContext
+          ? [
+              profileContext.displayName ? `대상자: ${profileContext.displayName}` : '',
+              profileContext.birthDate ? `생년월일: ${profileContext.birthDate}` : '',
+              profileContext.nationality ? `국적: ${formatProfileNationality(profileContext.nationality)}` : '',
+              profileContext.gender ? `성별: ${formatProfileGender(profileContext.gender)}` : '',
+            ].filter((item): item is string => item.length > 0)
+          : [],
+    note: firstText(value.note, value.footnote),
+  };
+}
 
 const CONTEXT_OPTIONS: { value: ContextType; label: string; icon: string; desc: string }[] = [
   { value: 'community', label: '커뮤니티', icon: '📋', desc: '인터넷 게시글·댓글' },
@@ -120,6 +323,448 @@ function ProbabilityPill({ prob }: { prob: 'high' | 'medium' | 'low' }) {
   return <span className={`prob-pill ${cls}`}>{label}</span>;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function getText(value: unknown): string {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return '';
+}
+
+function firstText(...values: unknown[]) {
+  for (const value of values) {
+    const text = getText(value);
+    if (text) {
+      return text;
+    }
+  }
+  return '';
+}
+
+function toTextList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => getText(item))
+    .filter((item) => item.length > 0);
+}
+
+function normalizeReferenceItem(value: unknown): DetailReference | null {
+  if (typeof value === 'string') {
+    return {
+      title: value.trim(),
+      summary: value.trim(),
+    };
+  }
+
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const title = firstText(
+    value.title,
+    value.name,
+    value.label,
+    value.law_name,
+    value.case_no,
+    value.article_no,
+    value.article,
+    value.heading,
+  );
+  const summary = firstText(
+    value.summary,
+    value.details,
+    value.description,
+    value.note,
+    value.excerpt,
+    value.text,
+    value.basis,
+    title,
+  );
+  const subtitle = firstText(value.subtitle, value.court, value.verdict, value.category);
+  const url = firstText(value.url, value.link, value.source_url, value.href);
+  const href = firstText(value.href);
+  const kind = firstText(value.kind, value.category);
+
+  if (!title && !summary) {
+    return null;
+  }
+
+  return {
+    kind: kind || undefined,
+    title: title || summary,
+    summary: summary || title,
+    subtitle: subtitle || undefined,
+    url: url || undefined,
+    href: href || undefined,
+  };
+}
+
+function collectReferenceItems(value: unknown): DetailReference[] {
+  const items: DetailReference[] = [];
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => {
+      const normalized = normalizeReferenceItem(item);
+      if (normalized) {
+        items.push(normalized);
+      }
+    });
+    return items;
+  }
+
+  if (!isRecord(value)) {
+    return items;
+  }
+
+  const nestedSources = [
+    value.reference_library,
+    value.referenceLibrary,
+    value.references,
+    value.law_reference_library,
+    value.precedent_reference_library,
+    value.laws,
+    value.precedents,
+    value.items,
+  ];
+
+  nestedSources.forEach((source) => {
+    if (Array.isArray(source)) {
+      source.forEach((item) => {
+        const normalized = normalizeReferenceItem(item);
+        if (normalized) {
+          items.push(normalized);
+        }
+      });
+    }
+  });
+
+  if (items.length === 0) {
+    const normalized = normalizeReferenceItem(value);
+    if (normalized) {
+      items.push(normalized);
+    }
+  }
+
+  return items;
+}
+
+function buildDetailPanelData(
+  eyebrow: string,
+  title: string,
+  summary: string,
+  metadata: Array<{ label: string; value: string }>,
+  highlights: string[],
+  referenceSource: unknown,
+): DetailPanelData {
+  return {
+    eyebrow,
+    title,
+    summary,
+    metadata,
+    highlights,
+    references: collectReferenceItems(referenceSource),
+  };
+}
+
+function buildChargeDetail(charge: Charge, index: number): DetailPanelData {
+  return buildDetailPanelData(
+    '탐지된 법적 쟁점',
+    charge.charge,
+    charge.basis,
+    [
+      { label: '성립 가능성', value: charge.probability === 'high' ? '높음' : charge.probability === 'medium' ? '보통' : '낮음' },
+      { label: '예상 처벌', value: charge.expected_penalty || '추가 조회 필요' },
+      { label: '우선순위', value: `#${index + 1}` },
+    ],
+    charge.elements_met,
+    {
+      reference_library: charge.reference_library,
+      referenceLibrary: charge.referenceLibrary,
+      references: charge.references,
+    },
+  );
+}
+
+function buildPrecedentDetail(precedent: PrecedentCard, index: number): DetailPanelData {
+  return buildDetailPanelData(
+    '유사 판례',
+    precedent.case_no,
+    precedent.summary,
+    [
+      { label: '법원', value: precedent.court || '미상' },
+      { label: '결론', value: precedent.verdict || '미상' },
+      { label: '유사도', value: `${Math.round((precedent.similarity_score ?? 0) * 100)}%` },
+      { label: '우선순위', value: `#${index + 1}` },
+    ],
+    [
+      precedent.case_no,
+      precedent.court,
+      precedent.verdict,
+      precedent.summary,
+    ].filter((item): item is string => Boolean(item)),
+    {
+      reference_library: precedent.reference_library,
+      referenceLibrary: precedent.referenceLibrary,
+      references: precedent.references,
+    },
+  );
+}
+
+function buildResultDetail(result: AnalysisResult): DetailPanelData | null {
+  const firstCharge = result.charges[0];
+  if (firstCharge) {
+    return buildChargeDetail(firstCharge, 0);
+  }
+
+  const firstPrecedent = result.precedent_cards[0];
+  if (firstPrecedent) {
+    return buildPrecedentDetail(firstPrecedent, 0);
+  }
+
+  const references = collectReferenceItems({
+    reference_library: result.reference_library,
+    law_reference_library: result.law_reference_library,
+    precedent_reference_library: result.precedent_reference_library,
+  });
+
+  if (references.length > 0) {
+    return {
+      eyebrow: '근거 라이브러리',
+      title: '참고 자료',
+      summary: result.summary,
+      metadata: [{ label: '참고 수', value: `${references.length}개` }],
+      highlights: [],
+      references,
+    };
+  }
+
+  return null;
+}
+
+function buildReferenceDetail(
+  reference: AnalysisReferenceItem,
+  kind: 'law' | 'precedent',
+  index: number,
+): DetailPanelData {
+  const title = firstText(
+    reference.title,
+    reference.law_name,
+    reference.case_no,
+    reference.label,
+    reference.article_no,
+  ) || (kind === 'law' ? '법령 근거' : '판례 근거');
+  const summary = firstText(
+    reference.summary,
+    reference.details,
+    reference.description,
+    reference.note,
+    reference.title,
+    reference.law_name,
+    reference.case_no,
+  ) || '참고용 근거입니다.';
+  const subtitle = firstText(reference.subtitle, reference.court, reference.verdict, reference.category);
+  const metadata = [
+    { label: '유형', value: kind === 'law' ? '법령' : '판례' },
+    { label: '우선순위', value: `#${index + 1}` },
+  ];
+
+  return {
+    eyebrow: kind === 'law' ? '매칭 법령' : '매칭 판례',
+    title,
+    summary,
+    metadata: subtitle ? [...metadata, { label: '출처', value: subtitle }] : metadata,
+    highlights: toTextList(reference.keywords ?? reference.tags),
+    references: collectReferenceItems(reference),
+  };
+}
+
+function splitReferenceGroups(references: DetailReference[]) {
+  const law = references.filter((reference) => reference.kind === 'law');
+  const precedent = references.filter((reference) => reference.kind === 'precedent');
+
+  return {
+    law,
+    precedent,
+  };
+}
+
+function findMatchingPrecedentReferences(precedent: PrecedentCard, references: DetailReference[]) {
+  const target = precedent.case_no.trim();
+  if (!target) {
+    return references;
+  }
+
+  const matches = references.filter((reference) =>
+    reference.title.includes(target) || reference.summary.includes(target),
+  );
+
+  return matches.length > 0 ? matches : references;
+}
+
+function normalizeAnalysisResult(
+  result: AnalysisLegalResultWithProfile | undefined,
+  responseReferenceLibrary: DetailReference[] = [],
+): AnalysisResult | null {
+  if (!result) {
+    return null;
+  }
+
+  const mergedTopLevelReferences = collectReferenceItems(result.reference_library);
+  const mergedLawReferences = collectReferenceItems(result.law_reference_library);
+  const mergedPrecedentReferences = collectReferenceItems(result.precedent_reference_library);
+  const allReferences =
+    responseReferenceLibrary.length > 0
+      ? responseReferenceLibrary
+      : mergedTopLevelReferences;
+  const splitReferences = splitReferenceGroups(allReferences);
+  const lawReferences = mergedLawReferences.length > 0 ? mergedLawReferences : splitReferences.law;
+  const precedentReferences =
+    mergedPrecedentReferences.length > 0 ? mergedPrecedentReferences : splitReferences.precedent;
+  const fallbackReferences = allReferences.length > 0 ? allReferences : [...lawReferences, ...precedentReferences];
+  const profileContext =
+    normalizeProfileContext(result.profile_context) ??
+    normalizeProfileContext(result.user_profile) ??
+    normalizeProfileContext({
+      ageBand: result.age_band,
+      ageYears: result.age_years,
+      isMinor: result.is_minor,
+    });
+  const profileConsiderations = [
+    ...toTextList(result.profile_considerations),
+    ...toTextList(profileContext?.legalNotes),
+  ];
+
+  return {
+    can_sue: Boolean(result.can_sue),
+    risk_level: Number(result.risk_level ?? 0),
+    summary: getText(result.summary) || '분석 결과',
+    profile_guidance: normalizeProfileGuidance(
+      result.profile_guidance ?? result.profile_context ?? result.user_profile,
+    ),
+    charges: Array.isArray(result.charges)
+      ? result.charges.map((charge) => ({
+          ...charge,
+          charge: getText(charge.charge) || '법적 쟁점',
+          basis: getText(charge.basis) || '추가 조회 필요',
+          elements_met: toTextList(charge.elements_met),
+          probability:
+            charge.probability === 'high' || charge.probability === 'medium' || charge.probability === 'low'
+              ? charge.probability
+              : 'low',
+          expected_penalty: getText(charge.expected_penalty) || '추가 조회 필요',
+          reference_library: (() => {
+            const local = collectReferenceItems(charge.reference_library ?? charge.referenceLibrary ?? charge.references);
+            return local.length > 0 ? local : fallbackReferences;
+          })(),
+          referenceLibrary: (() => {
+            const local = collectReferenceItems(charge.referenceLibrary ?? charge.reference_library ?? charge.references);
+            return local.length > 0 ? local : fallbackReferences;
+          })(),
+          references: (() => {
+            const local = collectReferenceItems(charge.references ?? charge.reference_library ?? charge.referenceLibrary);
+            return local.length > 0 ? local : fallbackReferences;
+          })(),
+        }))
+      : [],
+    recommended_actions: Array.isArray(result.recommended_actions)
+      ? result.recommended_actions.map((item) => getText(item)).filter((item) => item.length > 0)
+      : [],
+    evidence_to_collect: Array.isArray(result.evidence_to_collect)
+      ? result.evidence_to_collect.map((item) => getText(item)).filter((item) => item.length > 0)
+      : [],
+    precedent_cards: Array.isArray(result.precedent_cards)
+      ? result.precedent_cards.map((precedent) => {
+          const normalizedPrecedent: PrecedentCard = {
+            ...precedent,
+            case_no: getText(precedent.case_no) || '사건번호 미상',
+            court: getText(precedent.court) || '법원 미상',
+            verdict: getText(precedent.verdict) || '미상',
+            summary: getText(precedent.summary) || '요약 없음',
+            similarity_score:
+              typeof precedent.similarity_score === 'number' && !Number.isNaN(precedent.similarity_score)
+                ? precedent.similarity_score
+                : 0,
+          };
+
+          return {
+            ...normalizedPrecedent,
+            reference_library: (() => {
+              const local = collectReferenceItems(precedent.reference_library ?? precedent.referenceLibrary ?? precedent.references);
+              return local.length > 0 ? local : findMatchingPrecedentReferences(normalizedPrecedent, precedentReferences);
+            })(),
+            referenceLibrary: (() => {
+              const local = collectReferenceItems(precedent.referenceLibrary ?? precedent.reference_library ?? precedent.references);
+              return local.length > 0 ? local : findMatchingPrecedentReferences(normalizedPrecedent, precedentReferences);
+            })(),
+            references: (() => {
+              const local = collectReferenceItems(precedent.references ?? precedent.reference_library ?? precedent.referenceLibrary);
+              return local.length > 0 ? local : findMatchingPrecedentReferences(normalizedPrecedent, precedentReferences);
+            })(),
+          };
+        })
+      : [],
+    disclaimer: getText(result.disclaimer) || '본 분석은 참고용입니다.',
+    reference_library: allReferences,
+    law_reference_library: lawReferences,
+    precedent_reference_library: precedentReferences,
+    profile_context: profileContext,
+    profile_considerations: profileConsiderations,
+  };
+}
+
+function selectInlineDetail(result: AnalysisResult): DetailPanelData | null {
+  const firstLawReference = result.law_reference_library?.[0];
+  if (firstLawReference) {
+    return buildReferenceDetail(firstLawReference, 'law', 0);
+  }
+
+  const firstPrecedentReference = result.precedent_reference_library?.[0];
+  if (firstPrecedentReference) {
+    return buildReferenceDetail(firstPrecedentReference, 'precedent', 0);
+  }
+
+  const firstCharge = result.charges[0];
+  if (firstCharge) {
+    return buildChargeDetail(firstCharge, 0);
+  }
+
+  const firstPrecedent = result.precedent_cards[0];
+  if (firstPrecedent) {
+    return buildPrecedentDetail(firstPrecedent, 0);
+  }
+
+  return buildResultDetail(result);
+}
+
+function mergeProfileResult(
+  analysis: AnalysisResult,
+  response: AnalyzeCaseResponse,
+): AnalysisResult {
+  const payload = response as Record<string, unknown>;
+  const responseProfileContext = normalizeProfileContext(payload.profile_context);
+  const responseProfileGuidance = normalizeProfileGuidance(payload.profile_guidance);
+  const responseProfileConsiderations = toTextList(payload.profile_considerations);
+
+  return {
+    ...analysis,
+    profile_context: analysis.profile_context ?? responseProfileContext,
+    profile_guidance: analysis.profile_guidance ?? responseProfileGuidance,
+    profile_considerations:
+      analysis.profile_considerations && analysis.profile_considerations.length > 0
+        ? analysis.profile_considerations
+        : responseProfileConsiderations,
+  };
+}
+
 
 function PolicyRule({ label, passed }: { label: string; passed: boolean }) {
   return (
@@ -137,6 +782,12 @@ export default function App() {
   const [agentProgress, setAgentProgress] = useState<string[]>([]);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [selectedDetail, setSelectedDetail] = useState<DetailPanelData | null>(null);
+  const [keywordText, setKeywordText] = useState('');
+  const [keywordResult, setKeywordResult] = useState<AnalysisResult | null>(null);
+  const [keywordError, setKeywordError] = useState<string | null>(null);
+  const [keywordLoading, setKeywordLoading] = useState(false);
+  const [selectedKeywordDetail, setSelectedKeywordDetail] = useState<DetailPanelData | null>(null);
 
   const [session, setSession] = useState<{ user: AuthUser; token: string } | null>(null);
   const [guestSession, setGuestSession] = useState<GuestSession>(() => getInitialGuestSession());
@@ -147,6 +798,7 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [pendingAnalysis, setPendingAnalysis] = useState<PendingAnalysis | null>(null);
+  const [pendingKeyword, setPendingKeyword] = useState<PendingKeyword | null>(null);
 
   const [signupName, setSignupName] = useState('');
   const [signupBirthday, setSignupBirthday] = useState('');
@@ -160,6 +812,8 @@ export default function App() {
   const [verifyCode, setVerifyCode] = useState('');
   const [verifyTimer, setVerifyTimer] = useState(0);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [verifyInfo, setVerifyInfo] = useState<string | null>(null);
+  const [verifyBusy, setVerifyBusy] = useState(false);
 
   useEffect(() => {
     saveGuestSession(guestSession);
@@ -200,6 +854,24 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!result) {
+      setSelectedDetail(null);
+      return;
+    }
+
+    setSelectedDetail(buildResultDetail(result));
+  }, [result]);
+
+  useEffect(() => {
+    if (!keywordResult) {
+      setSelectedKeywordDetail(null);
+      return;
+    }
+
+    setSelectedKeywordDetail(selectInlineDetail(keywordResult));
+  }, [keywordResult]);
+
   const passwordPolicy = evaluatePasswordPolicy(authPassword);
   const canUseGuest = guestSession.guestRemaining > 0;
 
@@ -239,11 +911,14 @@ export default function App() {
           : {
               guest_id: guestSession.guestId,
             }),
-      })) as AnalyzeResponse;
+      })) as AnalyzeCaseResponse;
 
       await delay(AGENT_STEPS.length * 600 + 300);
 
-      const analysis = response.legal_analysis;
+      const analysis = normalizeAnalysisResult(
+        response.legal_analysis,
+        collectReferenceItems(response.reference_library),
+      );
       if (!analysis) {
         throw new Error('분석 결과를 불러오지 못했습니다.');
       }
@@ -260,7 +935,7 @@ export default function App() {
         });
       }
 
-      setResult(analysis);
+      setResult(mergeProfileResult(analysis, response));
       setPendingAnalysis(null);
       setView('results');
     } catch (err) {
@@ -280,12 +955,69 @@ export default function App() {
     }
   }
 
+  async function runKeywordVerify(snapshot: PendingKeyword, token: string | null) {
+    setKeywordError(null);
+    setKeywordLoading(true);
+    setAuthError(null);
+
+    try {
+      const response = (await verifyKeyword(ANALYSIS_BASE_URL, token, {
+        keyword: snapshot.keyword.trim(),
+        context_type: snapshot.contextType,
+        ...(token
+          ? {}
+          : {
+              guest_id: guestSession.guestId,
+            }),
+      })) as AnalyzeCaseResponse;
+
+      const analysis = normalizeAnalysisResult(
+        response.legal_analysis,
+        collectReferenceItems(response.reference_library),
+      );
+      if (!analysis) {
+        throw new Error('검증 결과를 불러오지 못했습니다.');
+      }
+
+      if (!token) {
+        const nextRemaining =
+          typeof response.guest_remaining === 'number'
+            ? Math.max(0, response.guest_remaining)
+            : Math.max(0, guestSession.guestRemaining - 1);
+
+        setGuestSession({
+          guestId: response.guest_id ?? response.meta?.guest_id ?? guestSession.guestId,
+          guestRemaining: nextRemaining,
+        });
+      }
+
+      setKeywordResult(mergeProfileResult(analysis, response));
+      setPendingKeyword(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '검증 중 오류가 발생했습니다.';
+      const unauthorized = /unauthorized|401/i.test(message);
+
+      if (unauthorized && token) {
+        clearStoredToken();
+        setSession(null);
+        setPendingKeyword(snapshot);
+        openLoginPage('세션이 만료되었습니다. 다시 로그인하세요.');
+        return;
+      }
+
+      setKeywordError(message);
+    } finally {
+      setKeywordLoading(false);
+    }
+  }
+
   async function handleAnalyzeClick() {
     if (!text.trim()) {
       return;
     }
 
     const snapshot = { text, contextType };
+    setPendingKeyword(null);
 
     if (session) {
       await runAnalysis(snapshot, session.token);
@@ -293,6 +1025,24 @@ export default function App() {
     }
 
     setPendingAnalysis(snapshot);
+    openLoginPage(canUseGuest ? undefined : '게스트 무료 3회를 모두 사용했습니다. 로그인 또는 회원가입이 필요합니다.');
+  }
+
+  async function handleKeywordVerifyClick() {
+    const keyword = keywordText.trim();
+    if (!keyword) {
+      return;
+    }
+
+    const snapshot = { keyword, contextType };
+    setPendingAnalysis(null);
+
+    if (session) {
+      await runKeywordVerify(snapshot, session.token);
+      return;
+    }
+
+    setPendingKeyword(snapshot);
     openLoginPage(canUseGuest ? undefined : '게스트 무료 3회를 모두 사용했습니다. 로그인 또는 회원가입이 필요합니다.');
   }
 
@@ -306,6 +1056,12 @@ export default function App() {
       setSession({ user: response.user, token: response.token });
       setAuthBusy(false);
       setAuthPassword('');
+      if (pendingKeyword) {
+        const snapshot = pendingKeyword;
+        setPendingKeyword(null);
+        await runKeywordVerify(snapshot, response.token);
+        return;
+      }
       if (pendingAnalysis) {
         const snapshot = pendingAnalysis;
         setPendingAnalysis(null);
@@ -320,10 +1076,18 @@ export default function App() {
   }
 
   async function handleGuestContinue() {
-    if (!pendingAnalysis || guestSession.guestRemaining <= 0) return;
-    const snapshot = pendingAnalysis;
-    setPendingAnalysis(null);
-    await runAnalysis(snapshot, null);
+    if (guestSession.guestRemaining <= 0) return;
+    if (pendingKeyword) {
+      const snapshot = pendingKeyword;
+      setPendingKeyword(null);
+      await runKeywordVerify(snapshot, null);
+      return;
+    }
+    if (pendingAnalysis) {
+      const snapshot = pendingAnalysis;
+      setPendingAnalysis(null);
+      await runAnalysis(snapshot, null);
+    }
   }
 
   function handleReset() {
@@ -331,6 +1095,10 @@ export default function App() {
     setResult(null);
     setAgentProgress([]);
     setAnalysisError(null);
+    setSelectedDetail(null);
+    setKeywordResult(null);
+    setSelectedKeywordDetail(null);
+    setKeywordError(null);
     setView('input');
   }
 
@@ -348,6 +1116,8 @@ export default function App() {
     setVerifyCode('');
     setVerifyTimer(0);
     setVerifyError(null);
+    setVerifyInfo(null);
+    setVerifyBusy(false);
     setView('signup');
   }
 
@@ -356,13 +1126,49 @@ export default function App() {
     if (!email) return;
     setVerifyStep('sending');
     setVerifyError(null);
+    setVerifyInfo(null);
     try {
-      await requestEmailCode(AUTH_BASE_URL, email);
+      const response = await requestEmailCode(AUTH_BASE_URL, email);
       setVerifyStep('sent');
       setVerifyTimer(180); // 3분 카운트다운
+      if (response.debug_code) {
+        setVerifyCode(response.debug_code);
+        setVerifyInfo('메일 설정이 비활성이라 개발용 인증 코드가 자동 입력되었습니다.');
+      } else {
+        setVerifyInfo(response.message);
+      }
     } catch (err) {
       setVerifyStep('idle');
       setVerifyError(err instanceof Error ? err.message : '코드 발송에 실패했습니다.');
+    }
+  }
+
+  async function handleConfirmCode() {
+    const email = authEmail.trim();
+    if (!email || verifyCode.length !== 6) {
+      return;
+    }
+
+    setVerifyBusy(true);
+    setVerifyError(null);
+    setVerifyInfo(null);
+    try {
+      const response = await verifyEmailCode(AUTH_BASE_URL, {
+        email,
+        verification_code: verifyCode,
+      });
+      if (!response.verified) {
+        throw new Error('인증 코드 확인에 실패했습니다.');
+      }
+
+      setVerifyStep('verified');
+      setVerifyTimer(0);
+      setVerifyInfo(response.message || '이메일 인증이 완료되었습니다.');
+    } catch (err) {
+      setVerifyStep('sent');
+      setVerifyError(err instanceof Error ? err.message : '인증 코드 확인에 실패했습니다.');
+    } finally {
+      setVerifyBusy(false);
     }
   }
 
@@ -372,6 +1178,14 @@ export default function App() {
       setAuthError('이메일 인증을 먼저 완료해주세요.');
       return;
     }
+    if (!signupName.trim() || !signupBirthday.trim() || !signupGender || !signupNationality) {
+      setAuthError('이름, 생년월일, 성별, 내국인/외국인 정보를 모두 입력해주세요.');
+      return;
+    }
+    if (!/^\d{8}$/.test(signupBirthday.trim())) {
+      setAuthError('생년월일은 8자리 숫자여야 합니다.');
+      return;
+    }
     if (authPassword !== signupConfirmPassword) {
       setAuthError('비밀번호가 일치하지 않습니다.');
       return;
@@ -379,14 +1193,32 @@ export default function App() {
     setAuthBusy(true);
     setAuthError(null);
     try {
-      const response = await signup(AUTH_BASE_URL, {
+      const birthDate = signupBirthday.trim();
+      const signupPayload: SignupPayload = {
         email: authEmail.trim(),
         password: authPassword,
         verification_code: verifyCode,
-      });
+        name: signupName.trim(),
+        birth_date: `${birthDate.slice(0, 4)}-${birthDate.slice(4, 6)}-${birthDate.slice(6, 8)}`,
+        gender: signupGender,
+        nationality: signupNationality,
+      };
+      const response = await signup(AUTH_BASE_URL, signupPayload);
       saveStoredToken(response.token);
       setSession({ user: response.user, token: response.token });
       setAuthBusy(false);
+      if (pendingKeyword) {
+        const snapshot = pendingKeyword;
+        setPendingKeyword(null);
+        await runKeywordVerify(snapshot, response.token);
+        return;
+      }
+      if (pendingAnalysis) {
+        const snapshot = pendingAnalysis;
+        setPendingAnalysis(null);
+        await runAnalysis(snapshot, response.token);
+        return;
+      }
       setView('input');
     } catch (err) {
       setAuthBusy(false);
@@ -471,6 +1303,38 @@ export default function App() {
           <span className="analyze-arrow">→</span>
         </button>
 
+        <div className="keyword-verify">
+          <div className="section-label section-label-tight">키워드 검증</div>
+          <div className="keyword-row">
+            <input
+              className="keyword-input"
+              type="text"
+              placeholder="짧은 단어 또는 구문 입력 예: 모욕, 사기, 개인정보 유출"
+              value={keywordText}
+              onChange={(e) => setKeywordText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void handleKeywordVerifyClick();
+                }
+              }}
+            />
+            <button
+              className="keyword-btn"
+              type="button"
+              disabled={!keywordText.trim() || keywordLoading}
+              onClick={() => void handleKeywordVerifyClick()}
+            >
+              {keywordLoading ? '검증 중...' : '검증'}
+            </button>
+          </div>
+          <p className="keyword-note">
+            짧은 키워드를 넣으면 관련 법령과 판례를 빠르게 확인합니다. 비로그인 상태는 기존 분석과
+            같은 3회 게스트 제한을 따릅니다.
+          </p>
+          {keywordError && <div className="error-banner">{keywordError}</div>}
+        </div>
+
         <p className="guest-note">
           비로그인 상태에서는 게스트로 총 3회까지 사용할 수 있습니다. 남은 횟수는 우측 상단에서
           확인할 수 있습니다.
@@ -481,6 +1345,165 @@ export default function App() {
           법률 정보 제공 목적이며 법적 효력이 없습니다.
         </p>
       </div>
+
+      {keywordResult && (
+        <section className="result-section keyword-result-section">
+          <div className="keyword-result-head">
+            <div>
+              <h3 className="section-title">키워드 검증 결과</h3>
+              <p className="keyword-result-sub">
+                <strong>{keywordText.trim()}</strong> 기준으로 가까운 법령과 판례를 바로 묶었습니다.
+              </p>
+            </div>
+            <span className="keyword-result-pill">
+              {keywordResult.charges.length + keywordResult.precedent_cards.length}개 매칭
+            </span>
+          </div>
+
+          <div className="keyword-result-grid">
+            <div className="keyword-result-col">
+              <h4 className="keyword-column-title">매칭 법령</h4>
+              <div className="keyword-mini-list">
+                {(keywordResult.law_reference_library?.length
+                  ? keywordResult.law_reference_library.map((reference, index) => (
+                      <div key={`${reference.title ?? reference.law_name ?? index}`} className="keyword-mini-card">
+                        <div className="keyword-mini-card-main">
+                          <strong>{reference.title ?? reference.law_name ?? '법령 근거'}</strong>
+                          <span>{reference.summary ?? reference.note ?? '관련 법령 근거'}</span>
+                        </div>
+                        <button
+                          className="card-detail-btn"
+                          type="button"
+                          onClick={() => setSelectedKeywordDetail(buildReferenceDetail(reference, 'law', index))}
+                        >
+                          상세 보기
+                        </button>
+                      </div>
+                    ))
+                  : keywordResult.charges.map((charge, index) => (
+                      <div key={`${charge.charge}-${index}`} className="keyword-mini-card">
+                        <div className="keyword-mini-card-main">
+                          <strong>{charge.charge}</strong>
+                          <span>{charge.basis}</span>
+                        </div>
+                        <button
+                          className="card-detail-btn"
+                          type="button"
+                          onClick={() => setSelectedKeywordDetail(buildChargeDetail(charge, index))}
+                        >
+                          상세 보기
+                        </button>
+                      </div>
+                    )))}
+              </div>
+            </div>
+
+            <div className="keyword-result-col">
+              <h4 className="keyword-column-title">매칭 판례</h4>
+              <div className="keyword-mini-list">
+                {(keywordResult.precedent_reference_library?.length
+                  ? keywordResult.precedent_reference_library.map((reference, index) => (
+                      <div key={`${reference.title ?? reference.case_no ?? index}`} className="keyword-mini-card">
+                        <div className="keyword-mini-card-main">
+                          <strong>{reference.title ?? reference.case_no ?? '판례 근거'}</strong>
+                          <span>{reference.summary ?? reference.details ?? '관련 판례 근거'}</span>
+                        </div>
+                        <button
+                          className="card-detail-btn"
+                          type="button"
+                          onClick={() => setSelectedKeywordDetail(buildReferenceDetail(reference, 'precedent', index))}
+                        >
+                          상세 보기
+                        </button>
+                      </div>
+                    ))
+                  : keywordResult.precedent_cards.map((precedent, index) => (
+                      <div key={`${precedent.case_no}-${index}`} className="keyword-mini-card">
+                        <div className="keyword-mini-card-main">
+                          <strong>{precedent.case_no}</strong>
+                          <span>{precedent.summary}</span>
+                        </div>
+                        <button
+                          className="card-detail-btn"
+                          type="button"
+                          onClick={() => setSelectedKeywordDetail(buildPrecedentDetail(precedent, index))}
+                        >
+                          상세 보기
+                        </button>
+                      </div>
+                    )))}
+              </div>
+            </div>
+          </div>
+
+          <div className="keyword-detail-shell">
+            {selectedKeywordDetail ? (
+              <div className="detail-panel-body detail-panel-body-inline">
+                <div className="detail-panel-kicker">{selectedKeywordDetail.eyebrow}</div>
+                <h4 className="detail-panel-title">{selectedKeywordDetail.title}</h4>
+                <p className="detail-panel-summary">{selectedKeywordDetail.summary}</p>
+
+                {selectedKeywordDetail.metadata.length > 0 && (
+                  <div className="detail-metadata">
+                    {selectedKeywordDetail.metadata.map((meta) => (
+                      <div key={`${meta.label}-${meta.value}`} className="detail-metadata-item">
+                        <span>{meta.label}</span>
+                        <strong>{meta.value}</strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {selectedKeywordDetail.highlights.length > 0 && (
+                  <div className="detail-highlight-list">
+                    {selectedKeywordDetail.highlights.map((item) => (
+                      <div key={item} className="detail-highlight-item">
+                        <span className="detail-highlight-dot" />
+                        <span>{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {selectedKeywordDetail.references.length > 0 ? (
+                  <div className="detail-reference-list">
+                    {selectedKeywordDetail.references.map((ref) =>
+                      ref.url ? (
+                        <a
+                          key={`${ref.title}-${ref.summary}-${ref.url}`}
+                          className="detail-reference-item"
+                          href={ref.url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <div className="detail-reference-text">
+                            <strong>{ref.title}</strong>
+                            <span>{ref.summary}</span>
+                          </div>
+                          {ref.subtitle && <span className="detail-reference-subtitle">{ref.subtitle}</span>}
+                          <span className="detail-reference-link">원문</span>
+                        </a>
+                      ) : (
+                        <div key={`${ref.title}-${ref.summary}`} className="detail-reference-item detail-reference-static">
+                          <div className="detail-reference-text">
+                            <strong>{ref.title}</strong>
+                            <span>{ref.summary}</span>
+                          </div>
+                          {ref.subtitle && <span className="detail-reference-subtitle">{ref.subtitle}</span>}
+                        </div>
+                      ),
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="detail-empty">
+                검증된 키워드를 누르면 이 영역에서 관련 법령과 판례 상세를 확인할 수 있습니다.
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       <div className="how-it-works">
         <div className="hiw-step">
@@ -560,6 +1583,91 @@ export default function App() {
         </div>
       </div>
 
+      {(result.profile_context || (result.profile_considerations?.length ?? 0) > 0) && (
+        <section className="result-section">
+          <h3 className="section-title">프로필 기반 안내</h3>
+          {result.profile_context && (
+            <div className="detail-metadata">
+              {result.profile_context.displayName && (
+                <div className="detail-metadata-item">
+                  <span>이름</span>
+                  <strong>{result.profile_context.displayName}</strong>
+                </div>
+              )}
+              {result.profile_context.ageBand && (
+                <div className="detail-metadata-item">
+                  <span>연령대</span>
+                  <strong>{formatProfileAgeBand(result.profile_context.ageBand)}</strong>
+                </div>
+              )}
+              {typeof result.profile_context.ageYears === 'number' && (
+                <div className="detail-metadata-item">
+                  <span>나이</span>
+                  <strong>{result.profile_context.ageYears}세</strong>
+                </div>
+              )}
+              {result.profile_context.birthDate && (
+                <div className="detail-metadata-item">
+                  <span>생년월일</span>
+                  <strong>{result.profile_context.birthDate}</strong>
+                </div>
+              )}
+              {result.profile_context.nationality && (
+                <div className="detail-metadata-item">
+                  <span>국적</span>
+                  <strong>{formatProfileNationality(result.profile_context.nationality)}</strong>
+                </div>
+              )}
+              {result.profile_context.gender && (
+                <div className="detail-metadata-item">
+                  <span>성별</span>
+                  <strong>{formatProfileGender(result.profile_context.gender)}</strong>
+                </div>
+              )}
+              {typeof result.profile_context.isMinor === 'boolean' && (
+                <div className="detail-metadata-item">
+                  <span>미성년 여부</span>
+                  <strong>{result.profile_context.isMinor ? '미성년자' : '성인'}</strong>
+                </div>
+              )}
+            </div>
+          )}
+
+          {(result.profile_considerations?.length ?? 0) > 0 && (
+            <div className="detail-highlight-list" style={{ marginTop: 12 }}>
+              {result.profile_considerations?.map((item) => (
+                <div key={item} className="detail-highlight-item">
+                  <span className="detail-highlight-dot" />
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {result.profile_guidance && (
+            <div className="detail-panel-body detail-panel-body-inline" style={{ marginTop: 16 }}>
+              <div className="detail-panel-kicker">{result.profile_guidance.title}</div>
+              <h4 className="detail-panel-title">{result.profile_guidance.summary}</h4>
+              {result.profile_guidance.items.length > 0 && (
+                <div className="detail-highlight-list">
+                  {result.profile_guidance.items.map((item) => (
+                    <div key={item} className="detail-highlight-item">
+                      <span className="detail-highlight-dot" />
+                      <span>{item}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {result.profile_guidance.note && (
+                <p className="detail-panel-sub" style={{ marginTop: 10 }}>
+                  {result.profile_guidance.note}
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
       <div className="results-grid">
         <div className="results-col">
           {result.charges.length > 0 && (
@@ -569,8 +1677,17 @@ export default function App() {
                 {result.charges.map((charge, i) => (
                   <div key={i} className="charge-card">
                     <div className="charge-header">
-                      <span className="charge-name">{charge.charge}</span>
-                      <ProbabilityPill prob={charge.probability} />
+                      <div className="charge-header-main">
+                        <span className="charge-name">{charge.charge}</span>
+                        <ProbabilityPill prob={charge.probability} />
+                      </div>
+                      <button
+                        className="card-detail-btn"
+                        type="button"
+                        onClick={() => setSelectedDetail(buildChargeDetail(charge, i))}
+                      >
+                        상세 보기
+                      </button>
                     </div>
                     <div className="charge-basis">{charge.basis}</div>
                     {charge.expected_penalty && (
@@ -600,13 +1717,22 @@ export default function App() {
                 {result.precedent_cards.map((p, i) => (
                   <div key={i} className="precedent-card">
                     <div className="precedent-header">
-                      <span className="precedent-no">{p.case_no}</span>
-                      <span className="precedent-court">{p.court}</span>
-                      <span
-                        className={`verdict-badge ${p.verdict === '유죄' ? 'verdict-guilty' : 'verdict-not-guilty'}`}
+                      <div className="precedent-header-main">
+                        <span className="precedent-no">{p.case_no}</span>
+                        <span className="precedent-court">{p.court}</span>
+                        <span
+                          className={`verdict-badge ${p.verdict === '유죄' ? 'verdict-guilty' : 'verdict-not-guilty'}`}
+                        >
+                          {p.verdict}
+                        </span>
+                      </div>
+                      <button
+                        className="card-detail-btn"
+                        type="button"
+                        onClick={() => setSelectedDetail(buildPrecedentDetail(p, i))}
                       >
-                        {p.verdict}
-                      </span>
+                        상세 보기
+                      </button>
                     </div>
                     {p.summary && <p className="precedent-summary">{p.summary}</p>}
                     {p.similarity_score > 0 && (
@@ -626,6 +1752,93 @@ export default function App() {
         </div>
 
         <div className="results-col results-col-side">
+          <section className="result-section result-detail-panel">
+            <div className="detail-panel-head">
+              <div>
+                <h3 className="section-title">상세 보기</h3>
+                <p className="detail-panel-sub">
+                  카드를 누르면 법령·판례 근거와 참고 정보를 확인할 수 있습니다.
+                </p>
+              </div>
+              {selectedDetail && (
+                <span className="detail-panel-count">
+                  {selectedDetail.references.length > 0
+                    ? `${selectedDetail.references.length}개 근거`
+                    : '카드 상세'}
+                </span>
+              )}
+            </div>
+
+            {selectedDetail ? (
+              <div className="detail-panel-body">
+                <div className="detail-panel-kicker">{selectedDetail.eyebrow}</div>
+                <h4 className="detail-panel-title">{selectedDetail.title}</h4>
+                <p className="detail-panel-summary">{selectedDetail.summary}</p>
+
+                {selectedDetail.metadata.length > 0 && (
+                  <div className="detail-metadata">
+                    {selectedDetail.metadata.map((meta) => (
+                      <div key={`${meta.label}-${meta.value}`} className="detail-metadata-item">
+                        <span>{meta.label}</span>
+                        <strong>{meta.value}</strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {selectedDetail.highlights.length > 0 && (
+                  <div className="detail-highlight-list">
+                    {selectedDetail.highlights.map((item) => (
+                      <div key={item} className="detail-highlight-item">
+                        <span className="detail-highlight-dot" />
+                        <span>{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {selectedDetail.references.length > 0 ? (
+                  <div className="detail-reference-list">
+                    {selectedDetail.references.map((ref) => (
+                      ref.url ? (
+                        <a
+                          key={`${ref.title}-${ref.summary}-${ref.url}`}
+                          className="detail-reference-item"
+                          href={ref.url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <div className="detail-reference-text">
+                            <strong>{ref.title}</strong>
+                            <span>{ref.summary}</span>
+                          </div>
+                          {ref.subtitle && <span className="detail-reference-subtitle">{ref.subtitle}</span>}
+                          <span className="detail-reference-link">원문</span>
+                        </a>
+                      ) : (
+                        <div key={`${ref.title}-${ref.summary}`} className="detail-reference-item detail-reference-static">
+                          <div className="detail-reference-text">
+                            <strong>{ref.title}</strong>
+                            <span>{ref.summary}</span>
+                          </div>
+                          {ref.subtitle && <span className="detail-reference-subtitle">{ref.subtitle}</span>}
+                        </div>
+                      )
+                    ))}
+                  </div>
+                ) : (
+                  <div className="detail-empty">
+                    참고 라이브러리가 없으면 카드의 핵심 정보만 우선 표시됩니다.
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="detail-empty">
+                카드의 <strong>상세 보기</strong>를 누르면 여기에서 판례와 근거를 확인할 수 있습니다.
+              </div>
+            )}
+          </section>
+
           <section className="result-section">
             <h3 className="section-title">권장 행동</h3>
             <div className="action-list">
@@ -690,7 +1903,7 @@ export default function App() {
                 type="email"
                 placeholder="이메일 (아이디)"
                 value={authEmail}
-                onChange={(e) => { setAuthEmail(e.target.value); setVerifyStep('idle'); setVerifyError(null); }}
+                onChange={(e) => { setAuthEmail(e.target.value); setVerifyStep('idle'); setVerifyError(null); setVerifyInfo(null); }}
                 autoComplete="email"
                 disabled={verifyStep === 'verified'}
                 required
@@ -731,20 +1944,16 @@ export default function App() {
                 <button
                   type="button"
                   className="signup-code-btn"
-                  disabled={verifyCode.length !== 6}
-                  onClick={() => {
-                    // client-side: pass code into signup — verified on server
-                    setVerifyStep('verified');
-                    setVerifyTimer(0);
-                    setVerifyError(null);
-                  }}
+                  disabled={verifyCode.length !== 6 || verifyBusy}
+                  onClick={() => void handleConfirmCode()}
                 >
-                  인증 확인
+                  {verifyBusy ? '확인중...' : '인증 확인'}
                 </button>
               </div>
             )}
           </div>
 
+          {verifyInfo && <div className="signup-info">{verifyInfo}</div>}
           {verifyError && <div className="signup-error">{verifyError}</div>}
 
           {/* ── Step 2: 비밀번호 ── */}

@@ -15,6 +15,10 @@ async function main() {
   assert.ok(textResult.law_search.laws.length >= 2, "text fixture should map to laws");
   assert.ok(textResult.legal_analysis.disclaimer.includes("법적 효력"), "legal analysis should include disclaimer");
   assert.ok(Array.isArray(textResult.legal_analysis.issue_cards), "legal analysis should include formatted cards");
+  assert.ok(textResult.meta?.retrieval_preview?.law, "analysis meta should include law retrieval preview");
+  assert.ok(textResult.meta?.retrieval_preview?.precedent, "analysis meta should include precedent retrieval preview");
+  assert.ok(Array.isArray(textResult.meta?.retrieval_trace), "analysis meta should include retrieval trace");
+  assert.ok(textResult.meta.retrieval_trace.length >= 2, "analysis meta should include both retrieval stages");
   assert.equal("report" in textResult, false, "report stage should be removed");
 
   const imageResult = await runCase("fixtures/requests/sample-messenger-image.json");
@@ -27,6 +31,8 @@ async function main() {
     ["analysis", "classifier", "law", "ocr", "precedent"].sort(),
     "pipeline should complete every runtime agent stage"
   );
+  assert.ok(imageResult.law_search.retrieval_preview, "law search should expose a preview");
+  assert.ok(imageResult.precedent_search.retrieval_preview, "precedent search should expose a preview");
 
   process.stdout.write("Mock pipeline checks passed.\n");
 }

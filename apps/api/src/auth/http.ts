@@ -115,6 +115,13 @@ export function createAuthHandler(service: AuthService, config: AuthConfig) {
         return;
       }
 
+      if (req.method === "POST" && isPath(pathname, ["/auth/verify-email-code", "/api/auth/verify-email-code"])) {
+        const payload = await readJsonBody(req, config.requestBodyLimit);
+        const result = await service.verifyEmailCode(payload);
+        jsonResponse(res, config, result.status, result.body, req);
+        return;
+      }
+
       if (req.method === "GET" && isPath(pathname, ["/auth/me", "/api/auth/me"])) {
         const token = extractBearerToken(req.headers.authorization);
         if (!token) {
@@ -124,11 +131,21 @@ export function createAuthHandler(service: AuthService, config: AuthConfig) {
         }
 
         const claims = await service.verifyToken(token);
+        const userId = Number(claims.sub);
+        if (!Number.isFinite(userId)) {
+          const error = new Error("Unauthorized.") as HttpError;
+          error.status = 401;
+          throw error;
+        }
+
+        const profile = await service.getUserProfile(userId);
         jsonResponse(res, config, 200, {
           user: {
-            id: Number(claims.sub),
-            email: claims.email
+            id: userId,
+            email: claims.email,
+            profile
           },
+          profile,
           tokenType: "Bearer",
           token_type: "Bearer"
         }, req);

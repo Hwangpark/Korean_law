@@ -5,6 +5,11 @@ import { createPostgresClient } from "./auth/postgres.js";
 import { loadAnalysisConfig } from "./analysis/config.js";
 import { createAnalysisHandler } from "./analysis/http.js";
 import { createAnalysisStore } from "./analysis/store.js";
+import {
+  createKeywordVerificationHandler,
+  createKeywordVerificationService,
+  createKeywordVerificationStore
+} from "./retrieval/index.js";
 
 async function main(): Promise<void> {
   const config = loadAuthConfig();
@@ -12,19 +17,36 @@ async function main(): Promise<void> {
   const service = createAuthService(config);
   const analysisDb = createPostgresClient(config.database);
   const analysisStore = createAnalysisStore(analysisDb);
+  const keywordStore = createKeywordVerificationStore(analysisDb);
+  const keywordService = createKeywordVerificationService({
+    providerMode: analysisConfig.providerMode,
+    analysisStore,
+    keywordStore
+  });
 
   await service.ensureSchema();
   await analysisStore.ensureSchema();
+  await keywordStore.ensureSchema();
 
   const handler = createAuthHandler(service, config);
   const analysisHandler = createAnalysisHandler(service, config, analysisConfig, analysisStore);
+  const keywordHandler = createKeywordVerificationHandler(
+    service,
+    config,
+    analysisConfig,
+    analysisStore,
+    keywordService
+  );
   const server = http.createServer((req, res) => {
     void Promise.resolve()
       .then(async () => {
-        const handled = await analysisHandler(req, res);
-        if (!handled) {
-          await handler(req, res);
-        }
+        const keywordHandled = await keywordHandler(req, res);
+        if (keywordHandled) return;
+
+        const analysisHandled = await analysisHandler(req, res);
+        if (analysisHandled) return;
+
+        await handler(req, res);
       })
       .catch((error: unknown) => {
         console.error(error);

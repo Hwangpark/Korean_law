@@ -25,6 +25,11 @@
 - 병렬 대상인 Law Search / Precedent Search를 코드 구조에서 분리한다.
 - Legal Analysis Agent가 최종 사용자용 결과 포맷까지 직접 생성한다.
 - 이후 live provider를 붙일 때 agent 인터페이스는 유지하고 내부 provider만 바꾼다.
+- retrieval 계층은 가능한 한 `tool runtime`으로 먼저 수렴하고, agent는 thin wrapper로 유지한다.
+
+## MCP-first 확장
+- 세부 흐름은 [docs/mcp-first-runtime.md](/Users/minsu/Desktop/KoreanLaw/docs/mcp-first-runtime.md)에 정리한다.
+- `preview`는 UI용, `trace`는 디버깅용으로 분리한다.
 
 ## Mock 모드 원칙
 - OCR은 fixture 기반 또는 텍스트 입력 정규화만 수행한다.

@@ -1,6 +1,15 @@
 import { createHash } from "node:crypto";
 
 import type { PostgresClient } from "../auth/postgres.js";
+import {
+  buildReferenceSeeds,
+  escapeLike,
+  mapReferenceDetailRow,
+  mapReferenceRow,
+  type ReferenceDetailItem,
+  type ReferenceLibraryItem,
+  type ReferenceRow
+} from "./references.js";
 
 interface IdRow {
   id: string;
@@ -34,6 +43,16 @@ export interface SaveAnalysisInput {
   providerMode: string;
   result: Record<string, unknown>;
   timeline: unknown[];
+  preview?: unknown;
+  trace?: unknown[];
+  profileSnapshot?: Record<string, unknown> | null;
+}
+
+export interface SaveReferenceLibraryInput {
+  providerMode: string;
+  result: Record<string, unknown>;
+  caseId?: string | null;
+  runId?: string | null;
 }
 
 export interface AnalysisHistoryItem {
@@ -58,13 +77,20 @@ export interface GuestUsageResult {
 
 export interface AnalysisStore {
   ensureSchema(): Promise<void>;
-  saveAnalysis(input: SaveAnalysisInput): Promise<{ caseId: string; runId: string }>;
+  saveAnalysis(input: SaveAnalysisInput): Promise<{ caseId: string; runId: string; referenceLibrary: ReferenceLibraryItem[] }>;
+  saveReferenceLibrary(input: SaveReferenceLibraryInput): Promise<ReferenceLibraryItem[]>;
   listHistory(userId: number, limit?: number): Promise<AnalysisHistoryItem[]>;
   consumeGuestAnalysis(guestId: string, limit?: number): Promise<GuestUsageResult>;
+  searchReferences(query: string, limit?: number): Promise<ReferenceLibraryItem[]>;
+  getReferenceByKindAndId(kind: "law" | "precedent", id: string): Promise<ReferenceDetailItem | null>;
 }
 
 function stableHash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function toJson(value: unknown): string {
+  return JSON.stringify(value ?? {});
 }
 
 export function createAnalysisStore(db: PostgresClient): AnalysisStore {
@@ -112,10 +138,25 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
         provider_mode TEXT NOT NULL,
         can_sue BOOLEAN NOT NULL DEFAULT FALSE,
         risk_level SMALLINT NOT NULL DEFAULT 0,
+        profile_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
         result_json JSONB NOT NULL,
+        preview_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        trace_json JSONB NOT NULL DEFAULT '[]'::jsonb,
         timeline_json JSONB NOT NULL DEFAULT '[]'::jsonb,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
+    `);
+    await db.query(`
+      ALTER TABLE analysis_runs
+      ADD COLUMN IF NOT EXISTS profile_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb
+    `);
+    await db.query(`
+      ALTER TABLE analysis_runs
+      ADD COLUMN IF NOT EXISTS preview_json JSONB NOT NULL DEFAULT '{}'::jsonb
+    `);
+    await db.query(`
+      ALTER TABLE analysis_runs
+      ADD COLUMN IF NOT EXISTS trace_json JSONB NOT NULL DEFAULT '[]'::jsonb
     `);
     await db.query(`
       CREATE INDEX IF NOT EXISTS analysis_runs_user_created_idx
@@ -129,9 +170,139 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS reference_library (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        kind TEXT NOT NULL CHECK (kind IN ('law', 'precedent')),
+        source_key TEXT NOT NULL UNIQUE,
+        case_id UUID REFERENCES analysis_cases(id) ON DELETE SET NULL,
+        run_id UUID REFERENCES analysis_runs(id) ON DELETE SET NULL,
+        source_mode TEXT NOT NULL,
+        title TEXT NOT NULL,
+        subtitle TEXT,
+        summary TEXT NOT NULL,
+        details TEXT NOT NULL,
+        url TEXT,
+        article_no TEXT,
+        case_no TEXT,
+        court TEXT,
+        verdict TEXT,
+        penalty TEXT,
+        similarity_score REAL,
+        keywords JSONB NOT NULL DEFAULT '[]'::jsonb,
+        payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        search_text TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.query(`
+      CREATE INDEX IF NOT EXISTS reference_library_kind_updated_idx
+      ON reference_library (kind, updated_at DESC)
+    `);
+    await db.query(`
+      CREATE INDEX IF NOT EXISTS reference_library_case_idx
+      ON reference_library (case_id, run_id)
+    `);
   }
 
-  async function saveAnalysis(input: SaveAnalysisInput): Promise<{ caseId: string; runId: string }> {
+  async function upsertReferenceSeed(
+    seed: ReturnType<typeof buildReferenceSeeds>[number],
+    caseId?: string | null,
+    runId?: string | null
+  ): Promise<ReferenceLibraryItem> {
+    const result = await db.query<ReferenceRow>(
+      `
+        INSERT INTO reference_library (
+          kind,
+          source_key,
+          case_id,
+          run_id,
+          source_mode,
+          title,
+          subtitle,
+          summary,
+          details,
+          url,
+          article_no,
+          case_no,
+          court,
+          verdict,
+          penalty,
+          similarity_score,
+          keywords,
+          payload_json,
+          search_text
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, $18::jsonb, $19)
+        ON CONFLICT (source_key)
+        DO UPDATE SET
+          case_id = COALESCE(EXCLUDED.case_id, reference_library.case_id),
+          run_id = COALESCE(EXCLUDED.run_id, reference_library.run_id),
+          source_mode = EXCLUDED.source_mode,
+          title = EXCLUDED.title,
+          subtitle = EXCLUDED.subtitle,
+          summary = EXCLUDED.summary,
+          details = EXCLUDED.details,
+          url = EXCLUDED.url,
+          article_no = EXCLUDED.article_no,
+          case_no = EXCLUDED.case_no,
+          court = EXCLUDED.court,
+          verdict = EXCLUDED.verdict,
+          penalty = EXCLUDED.penalty,
+          similarity_score = EXCLUDED.similarity_score,
+          keywords = EXCLUDED.keywords,
+          payload_json = EXCLUDED.payload_json,
+          search_text = EXCLUDED.search_text,
+          updated_at = NOW()
+        RETURNING *
+      `,
+      [
+        seed.kind,
+        seed.sourceKey,
+        caseId ?? null,
+        runId ?? null,
+        seed.sourceMode,
+        seed.title,
+        seed.subtitle,
+        seed.summary,
+        seed.details,
+        seed.url,
+        seed.articleNo,
+        seed.caseNo,
+        seed.court,
+        seed.verdict,
+        seed.penalty,
+        seed.similarityScore,
+        toJson(seed.keywords),
+        toJson(seed.payload),
+        seed.searchText
+      ]
+    );
+
+    const row = result.rows[0];
+    if (!row) {
+      throw new Error("Failed to save reference library item.");
+    }
+    return mapReferenceRow(row);
+  }
+
+  async function saveReferenceLibrary(input: SaveReferenceLibraryInput): Promise<ReferenceLibraryItem[]> {
+    const seeds = buildReferenceSeeds(input.result, input.providerMode);
+    if (seeds.length === 0) {
+      return [];
+    }
+
+    const items: ReferenceLibraryItem[] = [];
+    for (const seed of seeds) {
+      items.push(await upsertReferenceSeed(seed, input.caseId ?? null, input.runId ?? null));
+    }
+    return items;
+  }
+
+  async function saveAnalysis(
+    input: SaveAnalysisInput
+  ): Promise<{ caseId: string; runId: string; referenceLibrary: ReferenceLibraryItem[] }> {
     const caseResult = await db.query<IdRow>(
       `
         INSERT INTO analysis_cases (user_id, input_mode, context_type, title, source_url)
@@ -167,7 +338,7 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
         input.mimeType ?? null,
         input.contentText,
         stableHash(input.contentText),
-        JSON.stringify(input.metadata ?? {})
+        toJson(input.metadata ?? {})
       ]
     );
 
@@ -180,10 +351,13 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
           provider_mode,
           can_sue,
           risk_level,
+          profile_snapshot,
           result_json,
+          preview_json,
+          trace_json,
           timeline_json
         )
-        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb)
         RETURNING id
       `,
       [
@@ -192,8 +366,11 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
         input.providerMode,
         Boolean(legalAnalysis.can_sue),
         Number(legalAnalysis.risk_level ?? 0),
-        JSON.stringify(input.result),
-        JSON.stringify(input.timeline)
+        toJson(input.profileSnapshot ?? {}),
+        toJson(input.result),
+        toJson(input.preview ?? {}),
+        toJson(input.trace ?? []),
+        toJson(input.timeline)
       ]
     );
 
@@ -202,7 +379,14 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
       throw new Error("Failed to create analysis run.");
     }
 
-    return { caseId, runId };
+    const referenceLibrary = await saveReferenceLibrary({
+      providerMode: input.providerMode,
+      result: input.result,
+      caseId,
+      runId
+    });
+
+    return { caseId, runId, referenceLibrary };
   }
 
   async function listHistory(userId: number, limit = 12): Promise<AnalysisHistoryItem[]> {
@@ -290,10 +474,74 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
     };
   }
 
+  async function searchReferences(query: string, limit = 12): Promise<ReferenceLibraryItem[]> {
+    const terms = String(query ?? "")
+      .trim()
+      .split(/\s+/)
+      .map((term) => term.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+
+    if (terms.length === 0) {
+      return [];
+    }
+
+    const conditions: string[] = [];
+    const params: string[] = [];
+    terms.forEach((term, index) => {
+      const paramIndex = index + 1;
+      params.push(`%${escapeLike(term)}%`);
+      conditions.push(
+        `(
+          title ILIKE $${paramIndex} ESCAPE '\\' OR
+          subtitle ILIKE $${paramIndex} ESCAPE '\\' OR
+          summary ILIKE $${paramIndex} ESCAPE '\\' OR
+          details ILIKE $${paramIndex} ESCAPE '\\' OR
+          search_text ILIKE $${paramIndex} ESCAPE '\\' OR
+          source_key ILIKE $${paramIndex} ESCAPE '\\'
+        )`
+      );
+    });
+
+    const result = await db.query<ReferenceRow>(
+      `
+        SELECT *
+        FROM reference_library
+        WHERE ${conditions.join(" AND ")}
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT $${terms.length + 1}
+      `,
+      [...params, limit]
+    );
+
+    return result.rows.map((row) => mapReferenceRow(row));
+  }
+
+  async function getReferenceByKindAndId(
+    kind: "law" | "precedent",
+    id: string
+  ): Promise<ReferenceDetailItem | null> {
+    const result = await db.query<ReferenceRow>(
+      `
+        SELECT *
+        FROM reference_library
+        WHERE kind = $1 AND source_key = $2
+        LIMIT 1
+      `,
+      [kind, id]
+    );
+
+    const row = result.rows[0];
+    return row ? mapReferenceDetailRow(row) : null;
+  }
+
   return {
     ensureSchema,
     saveAnalysis,
+    saveReferenceLibrary,
     listHistory,
-    consumeGuestAnalysis
+    consumeGuestAnalysis,
+    searchReferences,
+    getReferenceByKindAndId
   };
 }

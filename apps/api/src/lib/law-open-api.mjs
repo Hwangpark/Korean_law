@@ -126,6 +126,21 @@ function summarizePrecedent(detail) {
   return summary || "판례 요약을 불러오지 못했습니다.";
 }
 
+function deriveMatchedTopics(detail, topics) {
+  const searchable = normalizeText(
+    [
+      summarizePrecedent(detail),
+      stripHtml(detail?.["판시사항"]),
+      stripHtml(detail?.["판례내용"]).slice(0, 600)
+    ].join(" ")
+  );
+
+  return toArray(topics).filter((topic) => {
+    const normalizedTopic = normalizeText(topic);
+    return normalizedTopic && searchable.includes(normalizedTopic);
+  });
+}
+
 export async function fetchLawArticleByName(lawName, articleNo) {
   const searchPayload = await fetchLawApi("lawSearch.do", {
     target: "law",
@@ -226,7 +241,7 @@ export async function searchPrecedentsByQueries(queries, topics, limit = 3) {
             type: "HTML",
             ID: precedentId
           }).toString(),
-      topics
+      topics: deriveMatchedTopics(detail, topics)
     });
   }
 

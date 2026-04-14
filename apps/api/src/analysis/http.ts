@@ -5,6 +5,7 @@ import type { AuthConfig } from "../auth/config.js";
 import type { AuthService } from "../auth/service.js";
 import { ingestLink } from "../ingest/index.js";
 import type { AnalysisConfig } from "./config.js";
+import { buildProfileContext } from "./profile-context.js";
 import type { AnalysisStore, GuestUsageResult } from "./store.js";
 
 interface HttpError extends Error {
@@ -142,9 +143,8 @@ function inferTitle(payload: AnalyzePayload, inputMode: "text" | "image" | "link
 
 async function runAnalysisBridge(
   request: Record<string, unknown>,
-  options: { providerMode: string }
+  options: { providerMode: string; userContext?: Record<string, unknown> | null }
 ): Promise<Record<string, unknown>> {
-  // @ts-expect-error Legacy runtime pipeline is still implemented in .mjs.
   const module = await import("../orchestrator/run-analysis.mjs");
   return module.runAnalysis(request, options) as Promise<Record<string, unknown>>;
 }
@@ -158,19 +158,56 @@ function formatGuestUsage(usage: GuestUsageResult): Record<string, unknown> {
   };
 }
 
+function parseReferenceRoute(pathname: string): { kind: "law" | "precedent"; id: string } | null {
+  const match = /^\/api\/references\/([^/]+)\/(.+)$/.exec(pathname);
+  if (!match) {
+    return null;
+  }
+
+  const kind = match[1];
+  if (kind !== "law" && kind !== "precedent") {
+    return null;
+  }
+
+  return {
+    kind,
+    id: decodeURIComponent(match[2] ?? "")
+  };
+}
+
 export function createAnalysisHandler(
   authService: AuthService,
   authConfig: AuthConfig,
   analysisConfig: AnalysisConfig,
   store: AnalysisStore
 ) {
+  const authProfileService = authService as AuthService & {
+    getUserProfile?: (userId: number) => Promise<Record<string, unknown> | null>;
+  };
+
+  async function loadProfileContext(userId: number): Promise<Record<string, unknown> | null> {
+    if (!authProfileService.getUserProfile) {
+      return null;
+    }
+
+    const profile = await authProfileService.getUserProfile(userId);
+    const context = buildProfileContext(profile);
+    return context ? (context as unknown as Record<string, unknown>) : null;
+  }
+
   return async function handleAnalysisRequest(
     req: http.IncomingMessage,
     res: http.ServerResponse
   ): Promise<boolean> {
     const pathname = requestPath(req);
 
-    if (req.method === "OPTIONS" && (pathname === "/api/analyze" || pathname === "/api/history")) {
+    if (
+      req.method === "OPTIONS" &&
+      (pathname === "/api/analyze" ||
+        pathname === "/api/history" ||
+        pathname === "/api/references/search" ||
+        pathname.startsWith("/api/references/"))
+    ) {
       jsonResponse(res, authConfig, 204, null, req);
       return true;
     }
@@ -196,9 +233,53 @@ export function createAnalysisHandler(
       return true;
     }
 
+    if (req.method === "GET" && pathname === "/api/references/search") {
+      try {
+        const searchUrl = new URL(req.url ?? "/api/references/search", "http://localhost");
+        const query = String(searchUrl.searchParams.get("q") ?? "").trim();
+        if (!query) {
+          const error = new Error("q query parameter is required.") as HttpError;
+          error.status = 422;
+          throw error;
+        }
+
+        const items = await store.searchReferences(query, 12);
+        jsonResponse(res, authConfig, 200, { items }, req);
+      } catch (error) {
+        const err = error as HttpError;
+        jsonResponse(res, authConfig, err.status ?? 500, {
+          error: err.message || "Internal server error."
+        }, req);
+      }
+      return true;
+    }
+
+    if (req.method === "GET") {
+      const referenceRoute = parseReferenceRoute(pathname);
+      if (referenceRoute) {
+        try {
+          const item = await store.getReferenceByKindAndId(referenceRoute.kind, referenceRoute.id);
+          if (!item) {
+            const error = new Error("Reference not found.") as HttpError;
+            error.status = 404;
+            throw error;
+          }
+
+          jsonResponse(res, authConfig, 200, { item }, req);
+        } catch (error) {
+          const err = error as HttpError;
+          jsonResponse(res, authConfig, err.status ?? 500, {
+            error: err.message || "Internal server error."
+          }, req);
+        }
+        return true;
+      }
+    }
+
     if (req.method === "POST" && pathname === "/api/analyze") {
       let claims: Awaited<ReturnType<AuthService["verifyToken"]>> | null = null;
       let guestUsage: GuestUsageResult | null = null;
+      let profileContext: Record<string, unknown> | null = null;
 
       try {
         const payload = (await readJsonBody(req, analysisConfig.requestBodyLimit)) as AnalyzePayload;
@@ -223,6 +304,7 @@ export function createAnalysisHandler(
           const linkNote = String(payload.text ?? "").trim();
           if (isAuthenticated) {
             claims = await authService.verifyToken(String(token));
+            profileContext = await loadProfileContext(Number(claims.sub));
           } else {
             guestUsage = await store.consumeGuestAnalysis(guestId, 3);
             if (!guestUsage.allowed) {
@@ -298,6 +380,7 @@ export function createAnalysisHandler(
           metadata.ocr_note = contentText;
           if (isAuthenticated) {
             claims = await authService.verifyToken(String(token));
+            profileContext = await loadProfileContext(Number(claims.sub));
           } else {
             guestUsage = await store.consumeGuestAnalysis(guestId, 3);
             if (!guestUsage.allowed) {
@@ -320,6 +403,7 @@ export function createAnalysisHandler(
           sourceKind = "manual";
           if (isAuthenticated) {
             claims = await authService.verifyToken(String(token));
+            profileContext = await loadProfileContext(Number(claims.sub));
           } else {
             guestUsage = await store.consumeGuestAnalysis(guestId, 3);
             if (!guestUsage.allowed) {
@@ -334,10 +418,13 @@ export function createAnalysisHandler(
         }
 
         const result = await runAnalysisBridge(request, {
-          providerMode: analysisConfig.providerMode
+          providerMode: analysisConfig.providerMode,
+          userContext: profileContext ?? undefined
         });
         const ocr = (result.ocr ?? {}) as { raw_text?: string };
         const timeline = Array.isArray(result.timeline) ? result.timeline : [];
+        const preview = ((result.meta ?? {}) as { retrieval_preview?: unknown }).retrieval_preview ?? {};
+        const trace = ((result.meta ?? {}) as { retrieval_trace?: unknown[] }).retrieval_trace ?? [];
 
         if (isAuthenticated && claims) {
           const saved = await store.saveAnalysis({
@@ -353,19 +440,35 @@ export function createAnalysisHandler(
             metadata,
             providerMode: analysisConfig.providerMode,
             result: result as Record<string, unknown>,
-            timeline
+            timeline,
+            preview,
+            trace,
+            profileSnapshot: profileContext
           });
 
           jsonResponse(res, authConfig, 200, {
             ...result,
+            ...(profileContext ? { profile_context: profileContext } : {}),
             case_id: saved.caseId,
-            run_id: saved.runId
+            run_id: saved.runId,
+            reference_library: {
+              items: saved.referenceLibrary
+            }
           }, req);
           return true;
         }
 
+        const referenceLibrary = await store.saveReferenceLibrary({
+          providerMode: analysisConfig.providerMode,
+          result: result as Record<string, unknown>
+        });
+
         jsonResponse(res, authConfig, 200, {
           ...result,
+          ...(profileContext ? { profile_context: profileContext } : {}),
+          reference_library: {
+            items: referenceLibrary
+          },
           ...(guestUsage
             ? {
                 guest_usage: formatGuestUsage(guestUsage),
