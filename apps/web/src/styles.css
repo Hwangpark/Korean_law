@@ -1869,6 +1869,15 @@ body {
   padding: 10px 14px;
 }
 
+.signup-info {
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  border-radius: var(--r-sm);
+  color: #1d4ed8;
+  font-size: 0.88rem;
+  padding: 10px 14px;
+}
+
 .signup-submit {
   width: 100%;
   padding: 14px;

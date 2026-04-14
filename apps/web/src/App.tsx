@@ -600,6 +600,7 @@ export default function App() {
   const [verifyCode, setVerifyCode] = useState('');
   const [verifyTimer, setVerifyTimer] = useState(0);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [verifyInfo, setVerifyInfo] = useState<string | null>(null);
 
   useEffect(() => {
     saveGuestSession(guestSession);
@@ -902,6 +903,7 @@ export default function App() {
     setVerifyCode('');
     setVerifyTimer(0);
     setVerifyError(null);
+    setVerifyInfo(null);
     setView('signup');
   }
 
@@ -910,10 +912,17 @@ export default function App() {
     if (!email) return;
     setVerifyStep('sending');
     setVerifyError(null);
+    setVerifyInfo(null);
     try {
-      await requestEmailCode(AUTH_BASE_URL, email);
+      const response = await requestEmailCode(AUTH_BASE_URL, email);
       setVerifyStep('sent');
       setVerifyTimer(180); // 3분 카운트다운
+      if (response.debug_code) {
+        setVerifyCode(response.debug_code);
+        setVerifyInfo('메일 설정이 비활성이라 개발용 인증 코드가 자동 입력되었습니다.');
+      } else {
+        setVerifyInfo(response.message);
+      }
     } catch (err) {
       setVerifyStep('idle');
       setVerifyError(err instanceof Error ? err.message : '코드 발송에 실패했습니다.');
@@ -1552,7 +1561,7 @@ export default function App() {
                 type="email"
                 placeholder="이메일 (아이디)"
                 value={authEmail}
-                onChange={(e) => { setAuthEmail(e.target.value); setVerifyStep('idle'); setVerifyError(null); }}
+                onChange={(e) => { setAuthEmail(e.target.value); setVerifyStep('idle'); setVerifyError(null); setVerifyInfo(null); }}
                 autoComplete="email"
                 disabled={verifyStep === 'verified'}
                 required
@@ -1607,6 +1616,7 @@ export default function App() {
             )}
           </div>
 
+          {verifyInfo && <div className="signup-info">{verifyInfo}</div>}
           {verifyError && <div className="signup-error">{verifyError}</div>}
 
           {/* ── Step 2: 비밀번호 ── */}

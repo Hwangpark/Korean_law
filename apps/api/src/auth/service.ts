@@ -130,7 +130,13 @@ export function createAuthService(config: AuthConfig): AuthService {
 
     return {
       status: 200,
-      body: { message: "인증 코드를 발송했습니다. 이메일을 확인해주세요." }
+      body: {
+        message: config.email.enabled
+          ? "인증 코드를 발송했습니다. 이메일을 확인해주세요."
+          : "이메일 서비스가 설정되지 않아 개발용 인증 코드를 반환합니다.",
+        delivery: config.email.enabled ? "email" : "debug",
+        ...(config.email.enabled || config.nodeEnv === "production" ? {} : { debug_code: code })
+      }
     };
   }
 

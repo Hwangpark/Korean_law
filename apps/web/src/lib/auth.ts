@@ -358,8 +358,14 @@ function normalizeMeResponse(payload: RawMeResponse): MeResponse {
   };
 }
 
-export async function requestEmailCode(baseUrl: string, email: string): Promise<{ message: string }> {
-  return requestJson<{ message: string }>(`${normalizeBaseUrl(baseUrl)}/auth/request-email-code`, {
+export type EmailCodeResponse = {
+  message: string;
+  delivery?: 'email' | 'debug' | string;
+  debug_code?: string;
+};
+
+export async function requestEmailCode(baseUrl: string, email: string): Promise<EmailCodeResponse> {
+  return requestJson<EmailCodeResponse>(`${normalizeBaseUrl(baseUrl)}/auth/request-email-code`, {
     method: 'POST',
     body: JSON.stringify({ email }),
   });
