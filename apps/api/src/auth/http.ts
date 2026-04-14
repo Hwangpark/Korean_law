@@ -115,6 +115,13 @@ export function createAuthHandler(service: AuthService, config: AuthConfig) {
         return;
       }
 
+      if (req.method === "POST" && isPath(pathname, ["/auth/verify-email-code", "/api/auth/verify-email-code"])) {
+        const payload = await readJsonBody(req, config.requestBodyLimit);
+        const result = await service.verifyEmailCode(payload);
+        jsonResponse(res, config, result.status, result.body, req);
+        return;
+      }
+
       if (req.method === "GET" && isPath(pathname, ["/auth/me", "/api/auth/me"])) {
         const token = extractBearerToken(req.headers.authorization);
         if (!token) {

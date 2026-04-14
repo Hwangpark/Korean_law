@@ -25,6 +25,7 @@ interface AuthResponse {
 export interface AuthService {
   ensureSchema(): Promise<void>;
   requestEmailCode(payload: Record<string, unknown>): Promise<AuthResponse>;
+  verifyEmailCode(payload: Record<string, unknown>): Promise<AuthResponse>;
   signup(payload: Record<string, unknown>): Promise<AuthResponse>;
   login(payload: Record<string, unknown>): Promise<AuthResponse>;
   verifyToken(token: string): Promise<JwtPayload>;
@@ -195,6 +196,43 @@ export function createAuthService(config: AuthConfig): AuthService {
     };
   }
 
+  async function verifyEmailCode(payload: Record<string, unknown>): Promise<AuthResponse> {
+    const email = normalizeEmail(payload.email);
+    const code = String(payload.verification_code ?? "").trim();
+
+    if (!email) {
+      return { status: 400, body: { error: "이메일을 입력해주세요." } };
+    }
+
+    if (!code) {
+      return { status: 400, body: { error: "인증 코드를 입력해주세요." } };
+    }
+
+    const codeResult = await db.query<{ id: string }>(
+      `SELECT id
+       FROM email_verification_codes
+       WHERE email = $1
+         AND code = $2
+         AND expires_at > NOW()
+         AND used_at IS NULL
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [email, code]
+    );
+
+    if ((codeResult.rowCount ?? 0) === 0) {
+      return { status: 400, body: { error: "인증 코드가 올바르지 않거나 만료되었습니다." } };
+    }
+
+    return {
+      status: 200,
+      body: {
+        message: "이메일 인증이 완료되었습니다.",
+        verified: true
+      }
+    };
+  }
+
   async function login(payload: Record<string, unknown>): Promise<AuthResponse> {
     const email = normalizeEmail(payload.email);
     const password = String(payload.password ?? "");
@@ -243,6 +281,7 @@ export function createAuthService(config: AuthConfig): AuthService {
   return {
     ensureSchema,
     requestEmailCode,
+    verifyEmailCode,
     signup,
     login,
     verifyToken: verifyTokenValue,

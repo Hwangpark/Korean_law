@@ -364,10 +364,25 @@ export type EmailCodeResponse = {
   debug_code?: string;
 };
 
+export type EmailCodeVerificationResponse = {
+  message: string;
+  verified: boolean;
+};
+
 export async function requestEmailCode(baseUrl: string, email: string): Promise<EmailCodeResponse> {
   return requestJson<EmailCodeResponse>(`${normalizeBaseUrl(baseUrl)}/auth/request-email-code`, {
     method: 'POST',
     body: JSON.stringify({ email }),
+  });
+}
+
+export async function verifyEmailCode(
+  baseUrl: string,
+  payload: { email: string; verification_code: string },
+): Promise<EmailCodeVerificationResponse> {
+  return requestJson<EmailCodeVerificationResponse>(`${normalizeBaseUrl(baseUrl)}/auth/verify-email-code`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
   });
 }
 

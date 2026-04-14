@@ -6,6 +6,7 @@ import {
   requestEmailCode,
   analyzeCase,
   clearStoredToken,
+  verifyEmailCode,
   evaluatePasswordPolicy,
   fetchMe,
   getInitialAuthBaseUrl,
@@ -601,6 +602,7 @@ export default function App() {
   const [verifyTimer, setVerifyTimer] = useState(0);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [verifyInfo, setVerifyInfo] = useState<string | null>(null);
+  const [verifyBusy, setVerifyBusy] = useState(false);
 
   useEffect(() => {
     saveGuestSession(guestSession);
@@ -904,6 +906,7 @@ export default function App() {
     setVerifyTimer(0);
     setVerifyError(null);
     setVerifyInfo(null);
+    setVerifyBusy(false);
     setView('signup');
   }
 
@@ -926,6 +929,35 @@ export default function App() {
     } catch (err) {
       setVerifyStep('idle');
       setVerifyError(err instanceof Error ? err.message : '코드 발송에 실패했습니다.');
+    }
+  }
+
+  async function handleConfirmCode() {
+    const email = authEmail.trim();
+    if (!email || verifyCode.length !== 6) {
+      return;
+    }
+
+    setVerifyBusy(true);
+    setVerifyError(null);
+    setVerifyInfo(null);
+    try {
+      const response = await verifyEmailCode(AUTH_BASE_URL, {
+        email,
+        verification_code: verifyCode,
+      });
+      if (!response.verified) {
+        throw new Error('인증 코드 확인에 실패했습니다.');
+      }
+
+      setVerifyStep('verified');
+      setVerifyTimer(0);
+      setVerifyInfo(response.message || '이메일 인증이 완료되었습니다.');
+    } catch (err) {
+      setVerifyStep('sent');
+      setVerifyError(err instanceof Error ? err.message : '인증 코드 확인에 실패했습니다.');
+    } finally {
+      setVerifyBusy(false);
     }
   }
 
@@ -1602,15 +1634,10 @@ export default function App() {
                 <button
                   type="button"
                   className="signup-code-btn"
-                  disabled={verifyCode.length !== 6}
-                  onClick={() => {
-                    // client-side: pass code into signup — verified on server
-                    setVerifyStep('verified');
-                    setVerifyTimer(0);
-                    setVerifyError(null);
-                  }}
+                  disabled={verifyCode.length !== 6 || verifyBusy}
+                  onClick={() => void handleConfirmCode()}
                 >
-                  인증 확인
+                  {verifyBusy ? '확인중...' : '인증 확인'}
                 </button>
               </div>
             )}
