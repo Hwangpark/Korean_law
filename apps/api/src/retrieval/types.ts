@@ -77,6 +77,38 @@ export interface KeywordVerificationRequest {
   profileContext?: ProfileContext;
 }
 
+export interface RetrievalToolDescriptor {
+  name: string;
+  description: string;
+  parameters: Record<string, string>;
+}
+
+export interface RetrievalPreviewCard {
+  id: string;
+  title: string;
+  summary: string;
+}
+
+export interface RetrievalPreview {
+  headline: string;
+  top_issues: string[];
+  top_laws: RetrievalPreviewCard[];
+  top_precedents: RetrievalPreviewCard[];
+  profile_flags: string[];
+  disclaimer: string;
+}
+
+export interface RetrievalTraceEvent {
+  stage: "planner" | "law" | "precedent" | "detail";
+  tool: string;
+  provider: string;
+  duration_ms: number;
+  cache_hit: boolean;
+  input_ref: string;
+  output_ref: string[];
+  reason: string;
+}
+
 export interface VerifiedReferenceCard {
   id: string;
   kind: "law" | "precedent";
@@ -109,6 +141,11 @@ export interface KeywordVerificationResponse {
     warnings: string[];
     disclaimer: string;
   };
+  retrieval_preview?: {
+    law: RetrievalPreview | null;
+    precedent: RetrievalPreview | null;
+  };
+  retrieval_trace?: RetrievalTraceEvent[];
   matched_laws: VerifiedReferenceCard[];
   matched_precedents: VerifiedReferenceCard[];
   legal_analysis: {

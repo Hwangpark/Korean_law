@@ -5,10 +5,9 @@ import type { AuthService } from "../auth/service.js";
 import type { AnalysisConfig } from "../analysis/config.js";
 import { buildProfileContext } from "../analysis/profile-context.js";
 import type { AnalysisStore, GuestUsageResult } from "../analysis/store.js";
-import { createRetrievalAdapter } from "./mcp-adapter.js";
-import { buildKeywordQueryPlan } from "./planner.js";
 import type { KeywordVerificationService } from "./service.js";
 import type { KeywordContextType } from "./types.js";
+import { createRetrievalTools, listTools } from "./tools.js";
 
 interface HttpError extends Error {
   status?: number;
@@ -30,41 +29,6 @@ const ALLOWED_CONTEXT_TYPES = new Set<KeywordContextType>([
   "messenger",
   "other"
 ]);
-
-const TOOL_DESCRIPTIONS = [
-  {
-    name: "search_law_tool",
-    description: "입력어와 문맥에 맞는 관련 법령을 검색합니다.",
-    parameters: {
-      query: "string",
-      context_type: "community|game_chat|messenger|other",
-      limit: "number"
-    }
-  },
-  {
-    name: "get_law_detail_tool",
-    description: "search_law_tool 결과에서 받은 law_id로 법령 상세를 조회합니다.",
-    parameters: {
-      law_id: "string"
-    }
-  },
-  {
-    name: "search_precedent_tool",
-    description: "입력어와 문맥에 맞는 유사 판례를 검색합니다.",
-    parameters: {
-      query: "string",
-      context_type: "community|game_chat|messenger|other",
-      limit: "number"
-    }
-  },
-  {
-    name: "get_precedent_detail_tool",
-    description: "search_precedent_tool 결과에서 받은 precedent_id로 판례 상세를 조회합니다.",
-    parameters: {
-      precedent_id: "string"
-    }
-  }
-];
 
 function resolveOrigin(config: AuthConfig, req: http.IncomingMessage): string {
   const origin = req.headers.origin ?? "";
@@ -181,7 +145,11 @@ export function createKeywordVerificationHandler(
   const authProfileService = authService as AuthService & {
     getUserProfile?: (userId: number) => Promise<Record<string, unknown> | null>;
   };
-  const adapter = createRetrievalAdapter(analysisConfig.providerMode);
+  const retrievalTools = createRetrievalTools({
+    providerMode: analysisConfig.providerMode,
+    authService,
+    analysisStore
+  });
 
   async function loadProfileContext(userId: number): Promise<Record<string, unknown> | null> {
     if (!authProfileService.getUserProfile) {
@@ -191,23 +159,6 @@ export function createKeywordVerificationHandler(
     const profile = await authProfileService.getUserProfile(userId);
     const context = buildProfileContext(profile);
     return context ? (context as unknown as Record<string, unknown>) : null;
-  }
-
-  async function resolveProfileContext(
-    token: string | null,
-    payloadProfileContext: Record<string, unknown> | undefined
-  ): Promise<Record<string, unknown> | null> {
-    const explicitContext = buildProfileContext(payloadProfileContext);
-    if (explicitContext) {
-      return explicitContext as unknown as Record<string, unknown>;
-    }
-
-    if (!token) {
-      return null;
-    }
-
-    const claims = await authService.verifyToken(token);
-    return loadProfileContext(Number(claims.sub));
   }
 
   return async function handleKeywordVerificationRequest(
@@ -237,7 +188,7 @@ export function createKeywordVerificationHandler(
     }
 
     if (req.method === "GET" && isToolListPath) {
-      jsonResponse(res, authConfig, 200, { tools: TOOL_DESCRIPTIONS }, req);
+      jsonResponse(res, authConfig, 200, listTools(), req);
       return true;
     }
 
@@ -245,25 +196,15 @@ export function createKeywordVerificationHandler(
       try {
         const payload = (await readJsonBody(req, analysisConfig.requestBodyLimit)) as VerifyPayload;
         const token = extractBearerToken(req.headers.authorization);
-        const query = requireString(payload.query, "query field is required.");
-        const contextType = parseContextType(payload.context_type);
-        const limit = typeof payload.limit === "number" && Number.isFinite(payload.limit)
-          ? Math.min(Math.max(Math.floor(payload.limit), 1), 10)
-          : 5;
-        const profileContext = await resolveProfileContext(token, payload.profile_context);
-        const plan = buildKeywordQueryPlan(query, contextType, profileContext ?? undefined);
-        const laws = await adapter.searchLaws(plan, limit);
-        const items = await analysisStore.saveReferenceLibrary({
-          providerMode: analysisConfig.providerMode,
-          result: { law_search: { laws } }
+        const result = await retrievalTools.searchLawTool({
+          query: payload.query,
+          context_type: payload.context_type,
+          limit: payload.limit,
+          profile_context: payload.profile_context,
+          token
         });
 
-        jsonResponse(res, authConfig, 200, {
-          query,
-          context_type: contextType,
-          count: items.length,
-          items
-        }, req);
+        jsonResponse(res, authConfig, 200, result, req);
       } catch (error) {
         const err = error as HttpError;
         jsonResponse(res, authConfig, err.status ?? 500, { error: err.message || "Internal server error." }, req);
@@ -275,25 +216,15 @@ export function createKeywordVerificationHandler(
       try {
         const payload = (await readJsonBody(req, analysisConfig.requestBodyLimit)) as VerifyPayload;
         const token = extractBearerToken(req.headers.authorization);
-        const query = requireString(payload.query, "query field is required.");
-        const contextType = parseContextType(payload.context_type);
-        const limit = typeof payload.limit === "number" && Number.isFinite(payload.limit)
-          ? Math.min(Math.max(Math.floor(payload.limit), 1), 10)
-          : 5;
-        const profileContext = await resolveProfileContext(token, payload.profile_context);
-        const plan = buildKeywordQueryPlan(query, contextType, profileContext ?? undefined);
-        const precedents = await adapter.searchPrecedents(plan, limit);
-        const items = await analysisStore.saveReferenceLibrary({
-          providerMode: analysisConfig.providerMode,
-          result: { precedent_search: { precedents } }
+        const result = await retrievalTools.searchPrecedentTool({
+          query: payload.query,
+          context_type: payload.context_type,
+          limit: payload.limit,
+          profile_context: payload.profile_context,
+          token
         });
 
-        jsonResponse(res, authConfig, 200, {
-          query,
-          context_type: contextType,
-          count: items.length,
-          items
-        }, req);
+        jsonResponse(res, authConfig, 200, result, req);
       } catch (error) {
         const err = error as HttpError;
         jsonResponse(res, authConfig, err.status ?? 500, { error: err.message || "Internal server error." }, req);
@@ -304,14 +235,10 @@ export function createKeywordVerificationHandler(
     if (req.method === "POST" && getLawPath) {
       try {
         const payload = (await readJsonBody(req, analysisConfig.requestBodyLimit)) as VerifyPayload;
-        const lawId = requireString(payload.law_id, "law_id field is required.");
-        const item = await analysisStore.getReferenceByKindAndId("law", lawId);
-        if (!item) {
-          const error = new Error("Law reference not found.") as HttpError;
-          error.status = 404;
-          throw error;
-        }
-        jsonResponse(res, authConfig, 200, { item }, req);
+        const result = await retrievalTools.getLawDetailTool({
+          law_id: payload.law_id
+        });
+        jsonResponse(res, authConfig, 200, result, req);
       } catch (error) {
         const err = error as HttpError;
         jsonResponse(res, authConfig, err.status ?? 500, { error: err.message || "Internal server error." }, req);
@@ -322,14 +249,10 @@ export function createKeywordVerificationHandler(
     if (req.method === "POST" && getPrecedentPath) {
       try {
         const payload = (await readJsonBody(req, analysisConfig.requestBodyLimit)) as VerifyPayload;
-        const precedentId = requireString(payload.precedent_id, "precedent_id field is required.");
-        const item = await analysisStore.getReferenceByKindAndId("precedent", precedentId);
-        if (!item) {
-          const error = new Error("Precedent reference not found.") as HttpError;
-          error.status = 404;
-          throw error;
-        }
-        jsonResponse(res, authConfig, 200, { item }, req);
+        const result = await retrievalTools.getPrecedentDetailTool({
+          precedent_id: payload.precedent_id
+        });
+        jsonResponse(res, authConfig, 200, result, req);
       } catch (error) {
         const err = error as HttpError;
         jsonResponse(res, authConfig, err.status ?? 500, { error: err.message || "Internal server error." }, req);

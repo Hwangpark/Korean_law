@@ -2,6 +2,18 @@ import { findMatchedKeywords, normalizeText as normalizeSearchText } from "../li
 import { CONTEXT_PRECEDENT_HINTS, RETRIEVAL_ISSUE_CATALOG } from "./catalog.js";
 import type { CandidateIssue, KeywordContextType, KeywordQueryPlan, ProfileContext } from "./types.js";
 
+interface ClassificationIssueLike {
+  type?: unknown;
+  severity?: unknown;
+  keywords?: unknown;
+  law_search_queries?: unknown;
+}
+
+interface ClassificationResultLike {
+  searchable_text?: unknown;
+  issues?: unknown;
+}
+
 function normalizeText(value: string): string {
   return normalizeSearchText(value);
 }
@@ -169,5 +181,104 @@ export function buildKeywordQueryPlan(
     lawQueries,
     precedentQueries,
     warnings
+  };
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => String(item ?? "").trim()).filter(Boolean)
+    : [];
+}
+
+function normalizeClassificationIssues(
+  classificationResult: ClassificationResultLike
+): ClassificationIssueLike[] {
+  return Array.isArray(classificationResult.issues)
+    ? classificationResult.issues.filter((issue): issue is ClassificationIssueLike => Boolean(issue))
+    : [];
+}
+
+function buildAnalysisCandidateIssues(
+  issues: ClassificationIssueLike[],
+  contextType: KeywordContextType
+): CandidateIssue[] {
+  return issues
+    .map((issue) => {
+      const type = String(issue.type ?? "").trim();
+      if (!type) {
+        return null;
+      }
+
+      const matchedTerms = unique([
+        ...asStringArray(issue.keywords),
+        type
+      ]);
+      const lawQueries = unique([
+        ...asStringArray(issue.law_search_queries),
+        type
+      ]);
+      const precedentQueries = unique([
+        ...matchedTerms,
+        ...matchedTerms.map((term) => `${term} ${type}`),
+        ...lawQueries,
+        ...CONTEXT_PRECEDENT_HINTS[contextType].map((hint) => `${hint} ${type}`)
+      ]);
+      const severity = issue.severity === "high" || issue.severity === "medium" || issue.severity === "low"
+        ? issue.severity
+        : "low";
+
+      return {
+        type,
+        severity,
+        matchedTerms,
+        lawQueries,
+        precedentQueries,
+        reason: matchedTerms.length > 0
+          ? `${type} 쟁점으로 검토합니다. 입력어가 ${matchedTerms.join(", ")} 표현과 겹칩니다.`
+          : `${type} 쟁점으로 검토합니다.`
+      } satisfies CandidateIssue;
+    })
+    .filter((issue): issue is CandidateIssue => Boolean(issue));
+}
+
+export function buildAnalysisRetrievalPlan(
+  classificationResult: ClassificationResultLike,
+  contextType: KeywordContextType,
+  profileContext?: ProfileContext,
+  rawText?: string
+): KeywordQueryPlan {
+  const sourceText = String(rawText ?? classificationResult.searchable_text ?? "").trim();
+  const baseQuery = sourceText || normalizeClassificationIssues(classificationResult)
+    .flatMap((issue) => [
+      String(issue.type ?? "").trim(),
+      ...asStringArray(issue.keywords),
+      ...asStringArray(issue.law_search_queries)
+    ])
+    .filter(Boolean)
+    .join(" ");
+  const basePlan = buildKeywordQueryPlan(baseQuery || "일반 키워드 검증", contextType, profileContext);
+  const candidateIssues = buildAnalysisCandidateIssues(normalizeClassificationIssues(classificationResult), contextType);
+
+  if (candidateIssues.length === 0) {
+    return basePlan;
+  }
+
+  return {
+    ...basePlan,
+    originalQuery: baseQuery || basePlan.originalQuery,
+    normalizedQuery: normalizeText(baseQuery || basePlan.originalQuery),
+    candidateIssues,
+    lawQueries: unique([
+      ...candidateIssues.flatMap((issue) => issue.lawQueries),
+      ...basePlan.lawQueries
+    ]),
+    precedentQueries: unique([
+      ...candidateIssues.flatMap((issue) => issue.precedentQueries),
+      ...basePlan.precedentQueries
+    ]),
+    warnings: unique([
+      ...basePlan.warnings,
+      sourceText ? "원문 전체보다 분류 결과를 우선 반영해 검색 범위를 조정했습니다." : ""
+    ])
   };
 }

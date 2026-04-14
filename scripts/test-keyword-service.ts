@@ -84,6 +84,14 @@ async function main(): Promise<void> {
     throw new Error("expected profile considerations.");
   }
 
+  if (!result.retrieval_preview?.law || !result.retrieval_preview?.precedent) {
+    throw new Error("expected retrieval previews from the shared tool runtime.");
+  }
+
+  if (!Array.isArray(result.retrieval_trace) || result.retrieval_trace.length < 2) {
+    throw new Error("expected retrieval trace from the shared tool runtime.");
+  }
+
   process.stdout.write("Keyword service contract checks passed.\n");
 }
 

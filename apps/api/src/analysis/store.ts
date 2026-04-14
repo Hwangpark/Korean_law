@@ -43,6 +43,8 @@ export interface SaveAnalysisInput {
   providerMode: string;
   result: Record<string, unknown>;
   timeline: unknown[];
+  preview?: unknown;
+  trace?: unknown[];
   profileSnapshot?: Record<string, unknown> | null;
 }
 
@@ -138,6 +140,8 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
         risk_level SMALLINT NOT NULL DEFAULT 0,
         profile_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
         result_json JSONB NOT NULL,
+        preview_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        trace_json JSONB NOT NULL DEFAULT '[]'::jsonb,
         timeline_json JSONB NOT NULL DEFAULT '[]'::jsonb,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
@@ -145,6 +149,14 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
     await db.query(`
       ALTER TABLE analysis_runs
       ADD COLUMN IF NOT EXISTS profile_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb
+    `);
+    await db.query(`
+      ALTER TABLE analysis_runs
+      ADD COLUMN IF NOT EXISTS preview_json JSONB NOT NULL DEFAULT '{}'::jsonb
+    `);
+    await db.query(`
+      ALTER TABLE analysis_runs
+      ADD COLUMN IF NOT EXISTS trace_json JSONB NOT NULL DEFAULT '[]'::jsonb
     `);
     await db.query(`
       CREATE INDEX IF NOT EXISTS analysis_runs_user_created_idx
@@ -341,9 +353,11 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
           risk_level,
           profile_snapshot,
           result_json,
+          preview_json,
+          trace_json,
           timeline_json
         )
-        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb)
         RETURNING id
       `,
       [
@@ -354,6 +368,8 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
         Number(legalAnalysis.risk_level ?? 0),
         toJson(input.profileSnapshot ?? {}),
         toJson(input.result),
+        toJson(input.preview ?? {}),
+        toJson(input.trace ?? []),
         toJson(input.timeline)
       ]
     );

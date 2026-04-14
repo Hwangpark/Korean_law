@@ -1,7 +1,5 @@
 import { buildReferenceSeeds, type ReferenceLibraryItem } from "../analysis/references.js";
 import type { AnalysisStore } from "../analysis/store.js";
-import { createRetrievalAdapter } from "./mcp-adapter.js";
-import { buildKeywordQueryPlan } from "./planner.js";
 import type {
   KeywordVerificationRequest,
   KeywordVerificationResponse,
@@ -10,6 +8,7 @@ import type {
   VerificationActor
 } from "./types.js";
 import type { KeywordVerificationStore } from "./store.js";
+import { createRetrievalTools } from "./tools.js";
 import {
   buildLawVerificationCards,
   buildPrecedentVerificationCards,
@@ -92,26 +91,26 @@ function buildReferenceMap(items: ReferenceLibraryItem[]): Map<string, Reference
 export function createKeywordVerificationService(
   deps: KeywordVerificationServiceDeps
 ): KeywordVerificationService {
-  const adapter = createRetrievalAdapter(deps.providerMode);
+  const retrievalTools = createRetrievalTools({
+    providerMode: deps.providerMode,
+    analysisStore: deps.analysisStore
+  });
 
   return {
     async verifyKeyword(request, actor = {}) {
-      const plan = buildKeywordQueryPlan(request.query, request.contextType, request.profileContext);
+      const plan = retrievalTools.buildQueryPlan(request.query, request.contextType, request.profileContext);
       const limit = Math.max(1, Math.min(request.limit ?? 4, 6));
 
-      const [laws, precedents] = await Promise.all([
-        adapter.searchLaws(plan, limit),
-        adapter.searchPrecedents(plan, limit)
+      const [lawSearch, precedentSearch] = await Promise.all([
+        retrievalTools.searchLaws(limit, plan, request.profileContext),
+        retrievalTools.searchPrecedents(limit, plan, request.profileContext)
       ]);
+      const laws = lawSearch.laws;
+      const precedents = precedentSearch.precedents;
 
       const pseudoResult = buildPseudoAnalysisResult(laws, precedents);
       const referenceSeeds = buildReferenceSeeds(pseudoResult, deps.providerMode);
-      const referenceLibrary = await deps.analysisStore.saveReferenceLibrary({
-        providerMode: deps.providerMode,
-        result: pseudoResult,
-        caseId: null,
-        runId: null
-      });
+      const referenceLibrary = await retrievalTools.saveReferenceLibrary(pseudoResult);
       const referencesByKey = buildReferenceMap(referenceLibrary);
 
       const matchedLaws = buildLawVerificationCards(plan, laws, referencesByKey).slice(0, limit);
@@ -146,6 +145,14 @@ export function createKeywordVerificationService(
           warnings: plan.warnings,
           disclaimer
         },
+        retrieval_preview: {
+          law: lawSearch.retrieval_preview,
+          precedent: precedentSearch.retrieval_preview
+        },
+        retrieval_trace: [
+          ...lawSearch.retrieval_trace,
+          ...precedentSearch.retrieval_trace
+        ],
         matched_laws: matchedLaws,
         matched_precedents: matchedPrecedents,
         legal_analysis: {

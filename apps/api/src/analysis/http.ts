@@ -423,6 +423,8 @@ export function createAnalysisHandler(
         });
         const ocr = (result.ocr ?? {}) as { raw_text?: string };
         const timeline = Array.isArray(result.timeline) ? result.timeline : [];
+        const preview = ((result.meta ?? {}) as { retrieval_preview?: unknown }).retrieval_preview ?? {};
+        const trace = ((result.meta ?? {}) as { retrieval_trace?: unknown[] }).retrieval_trace ?? [];
 
         if (isAuthenticated && claims) {
           const saved = await store.saveAnalysis({
@@ -439,6 +441,8 @@ export function createAnalysisHandler(
             providerMode: analysisConfig.providerMode,
             result: result as Record<string, unknown>,
             timeline,
+            preview,
+            trace,
             profileSnapshot: profileContext
           });
 
