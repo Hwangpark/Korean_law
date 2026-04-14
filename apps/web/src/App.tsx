@@ -13,17 +13,18 @@ import {
   getInitialGuestSession,
   loadStoredToken,
   login,
-  saveGuestSession,
-  saveStoredToken,
-  signup,
-  verifyKeyword,
-  type AnalyzeCaseResponse,
+    saveGuestSession,
+    saveStoredToken,
+    signup,
+    verifyKeyword,
+    type AnalyzeCaseResponse,
   type AnalysisLegalResult,
   type AnalysisReferenceItem,
-  type AuthResponse,
-  type AuthUser,
-  type GuestSession,
-} from './lib/auth';
+    type AuthResponse,
+    type AuthUser,
+    type GuestSession,
+    type SignupPayload,
+  } from './lib/auth';
 
 const AUTH_BASE_URL = getInitialAuthBaseUrl();
 const ANALYSIS_BASE_URL = import.meta.env.VITE_ANALYSIS_BASE_URL ?? AUTH_BASE_URL ?? DEFAULT_AUTH_BASE_URL;
@@ -56,6 +57,18 @@ type PrecedentCard = {
   [key: string]: unknown;
 };
 
+type UserProfileContext = {
+  displayName?: string;
+  birthDate?: string;
+  gender?: string;
+  nationality?: string;
+  ageYears?: number;
+  ageBand?: string;
+  isMinor?: boolean;
+  legalNotes?: string[];
+  [key: string]: unknown;
+};
+
 type AnalysisResult = {
   can_sue: boolean;
   risk_level: number;
@@ -68,6 +81,25 @@ type AnalysisResult = {
   reference_library?: AnalysisReferenceItem[];
   law_reference_library?: AnalysisReferenceItem[];
   precedent_reference_library?: AnalysisReferenceItem[];
+  profile_context?: UserProfileContext | null;
+  profile_considerations?: string[];
+  profile_guidance?: ProfileGuidance | null;
+};
+
+type AnalysisLegalResultWithProfile = AnalysisLegalResult & {
+  user_profile?: UserProfileContext | null;
+  profile_context?: UserProfileContext | null;
+  profile_considerations?: string[];
+  age_band?: string;
+  age_years?: number;
+  is_minor?: boolean;
+};
+
+type ProfileGuidance = {
+  title: string;
+  summary: string;
+  items: string[];
+  note?: string;
 };
 
 type PendingAnalysis = {
@@ -97,6 +129,148 @@ type DetailPanelData = {
   highlights: string[];
   references: DetailReference[];
 };
+
+function normalizeProfileContext(value: unknown): UserProfileContext | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const legalNotes = toTextList(value.legalNotes ?? value.legal_notes);
+
+  const context: UserProfileContext = {
+    displayName: firstText(value.displayName, value.display_name, value.name),
+    birthDate: firstText(value.birthDate, value.birth_date),
+    gender: firstText(value.gender),
+    nationality: firstText(value.nationality),
+    ageYears:
+      typeof value.ageYears === 'number'
+        ? value.ageYears
+        : typeof value.age_years === 'number'
+          ? value.age_years
+          : undefined,
+    ageBand: firstText(value.ageBand, value.age_band),
+    isMinor:
+      typeof value.isMinor === 'boolean'
+        ? value.isMinor
+        : typeof value.is_minor === 'boolean'
+          ? value.is_minor
+          : undefined,
+    legalNotes: legalNotes.length > 0 ? legalNotes : undefined,
+  };
+
+  if (
+    !context.displayName &&
+    !context.birthDate &&
+    !context.gender &&
+    !context.nationality &&
+    context.ageYears === undefined &&
+    !context.ageBand &&
+    context.isMinor === undefined &&
+    (!context.legalNotes || context.legalNotes.length === 0)
+  ) {
+    return null;
+  }
+
+  return context;
+}
+
+function formatProfileNationality(value: string) {
+  if (value === 'korean') {
+    return '내국인';
+  }
+  if (value === 'foreign') {
+    return '외국인';
+  }
+  return value;
+}
+
+function formatProfileGender(value: string) {
+  if (value === 'male') {
+    return '남성';
+  }
+  if (value === 'female') {
+    return '여성';
+  }
+  return value;
+}
+
+function formatProfileAgeBand(value: string) {
+  if (value === 'child') {
+    return '18세 미만';
+  }
+  if (value === 'minor') {
+    return '미성년';
+  }
+  if (value === 'adult') {
+    return '성인';
+  }
+  return value;
+}
+
+function normalizeProfileGuidance(value: unknown): ProfileGuidance | null {
+  if (typeof value === 'string') {
+    const summary = value.trim();
+    if (!summary) {
+      return null;
+    }
+
+    return {
+      title: '프로필 기반 안내',
+      summary,
+      items: [],
+    };
+  }
+
+  if (Array.isArray(value)) {
+    const items = toTextList(value);
+    if (items.length === 0) {
+      return null;
+    }
+
+    return {
+      title: '프로필 기반 안내',
+      summary: items[0],
+      items,
+    };
+  }
+
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const items = toTextList(value.items ?? value.notes ?? value.legalNotes ?? value.legal_notes);
+  const profileContext = normalizeProfileContext(value);
+  const summary = firstText(
+    value.summary,
+    value.description,
+    value.note,
+    profileContext?.ageBand,
+    typeof profileContext?.ageYears === 'number' ? `${profileContext.ageYears}세 기준으로 검토하세요.` : '',
+    profileContext?.isMinor ? '미성년자 관련 절차를 우선 확인하세요.' : '',
+  );
+  const title = firstText(value.title, value.heading, value.label) || '프로필 기반 안내';
+
+  if (!summary && items.length === 0 && !profileContext) {
+    return null;
+  }
+
+  return {
+    title,
+    summary: summary || '프로필 정보를 반영한 참고 안내입니다.',
+    items:
+      items.length > 0
+        ? items
+        : profileContext
+          ? [
+              profileContext.displayName ? `대상자: ${profileContext.displayName}` : '',
+              profileContext.birthDate ? `생년월일: ${profileContext.birthDate}` : '',
+              profileContext.nationality ? `국적: ${formatProfileNationality(profileContext.nationality)}` : '',
+              profileContext.gender ? `성별: ${formatProfileGender(profileContext.gender)}` : '',
+            ].filter((item): item is string => item.length > 0)
+          : [],
+    note: firstText(value.note, value.footnote),
+  };
+}
 
 const CONTEXT_OPTIONS: { value: ContextType; label: string; icon: string; desc: string }[] = [
   { value: 'community', label: '커뮤니티', icon: '📋', desc: '인터넷 게시글·댓글' },
@@ -437,7 +611,7 @@ function findMatchingPrecedentReferences(precedent: PrecedentCard, references: D
 }
 
 function normalizeAnalysisResult(
-  result: AnalysisLegalResult | undefined,
+  result: AnalysisLegalResultWithProfile | undefined,
   responseReferenceLibrary: DetailReference[] = [],
 ): AnalysisResult | null {
   if (!result) {
@@ -456,11 +630,26 @@ function normalizeAnalysisResult(
   const precedentReferences =
     mergedPrecedentReferences.length > 0 ? mergedPrecedentReferences : splitReferences.precedent;
   const fallbackReferences = allReferences.length > 0 ? allReferences : [...lawReferences, ...precedentReferences];
+  const profileContext =
+    normalizeProfileContext(result.profile_context) ??
+    normalizeProfileContext(result.user_profile) ??
+    normalizeProfileContext({
+      ageBand: result.age_band,
+      ageYears: result.age_years,
+      isMinor: result.is_minor,
+    });
+  const profileConsiderations = [
+    ...toTextList(result.profile_considerations),
+    ...toTextList(profileContext?.legalNotes),
+  ];
 
   return {
     can_sue: Boolean(result.can_sue),
     risk_level: Number(result.risk_level ?? 0),
     summary: getText(result.summary) || '분석 결과',
+    profile_guidance: normalizeProfileGuidance(
+      result.profile_guidance ?? result.profile_context ?? result.user_profile,
+    ),
     charges: Array.isArray(result.charges)
       ? result.charges.map((charge) => ({
           ...charge,
@@ -527,6 +716,8 @@ function normalizeAnalysisResult(
     reference_library: allReferences,
     law_reference_library: lawReferences,
     precedent_reference_library: precedentReferences,
+    profile_context: profileContext,
+    profile_considerations: profileConsiderations,
   };
 }
 
@@ -552,6 +743,26 @@ function selectInlineDetail(result: AnalysisResult): DetailPanelData | null {
   }
 
   return buildResultDetail(result);
+}
+
+function mergeProfileResult(
+  analysis: AnalysisResult,
+  response: AnalyzeCaseResponse,
+): AnalysisResult {
+  const payload = response as Record<string, unknown>;
+  const responseProfileContext = normalizeProfileContext(payload.profile_context);
+  const responseProfileGuidance = normalizeProfileGuidance(payload.profile_guidance);
+  const responseProfileConsiderations = toTextList(payload.profile_considerations);
+
+  return {
+    ...analysis,
+    profile_context: analysis.profile_context ?? responseProfileContext,
+    profile_guidance: analysis.profile_guidance ?? responseProfileGuidance,
+    profile_considerations:
+      analysis.profile_considerations && analysis.profile_considerations.length > 0
+        ? analysis.profile_considerations
+        : responseProfileConsiderations,
+  };
 }
 
 
@@ -724,7 +935,7 @@ export default function App() {
         });
       }
 
-      setResult(analysis);
+      setResult(mergeProfileResult(analysis, response));
       setPendingAnalysis(null);
       setView('results');
     } catch (err) {
@@ -780,7 +991,7 @@ export default function App() {
         });
       }
 
-      setKeywordResult(analysis);
+      setKeywordResult(mergeProfileResult(analysis, response));
       setPendingKeyword(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : '검증 중 오류가 발생했습니다.';
@@ -967,6 +1178,14 @@ export default function App() {
       setAuthError('이메일 인증을 먼저 완료해주세요.');
       return;
     }
+    if (!signupName.trim() || !signupBirthday.trim() || !signupGender || !signupNationality) {
+      setAuthError('이름, 생년월일, 성별, 내국인/외국인 정보를 모두 입력해주세요.');
+      return;
+    }
+    if (!/^\d{8}$/.test(signupBirthday.trim())) {
+      setAuthError('생년월일은 8자리 숫자여야 합니다.');
+      return;
+    }
     if (authPassword !== signupConfirmPassword) {
       setAuthError('비밀번호가 일치하지 않습니다.');
       return;
@@ -974,11 +1193,17 @@ export default function App() {
     setAuthBusy(true);
     setAuthError(null);
     try {
-      const response = await signup(AUTH_BASE_URL, {
+      const birthDate = signupBirthday.trim();
+      const signupPayload: SignupPayload = {
         email: authEmail.trim(),
         password: authPassword,
         verification_code: verifyCode,
-      });
+        name: signupName.trim(),
+        birth_date: `${birthDate.slice(0, 4)}-${birthDate.slice(4, 6)}-${birthDate.slice(6, 8)}`,
+        gender: signupGender,
+        nationality: signupNationality,
+      };
+      const response = await signup(AUTH_BASE_URL, signupPayload);
       saveStoredToken(response.token);
       setSession({ user: response.user, token: response.token });
       setAuthBusy(false);
@@ -1357,6 +1582,91 @@ export default function App() {
           {result.can_sue ? '고소 가능' : '고소 어려움'}
         </div>
       </div>
+
+      {(result.profile_context || (result.profile_considerations?.length ?? 0) > 0) && (
+        <section className="result-section">
+          <h3 className="section-title">프로필 기반 안내</h3>
+          {result.profile_context && (
+            <div className="detail-metadata">
+              {result.profile_context.displayName && (
+                <div className="detail-metadata-item">
+                  <span>이름</span>
+                  <strong>{result.profile_context.displayName}</strong>
+                </div>
+              )}
+              {result.profile_context.ageBand && (
+                <div className="detail-metadata-item">
+                  <span>연령대</span>
+                  <strong>{formatProfileAgeBand(result.profile_context.ageBand)}</strong>
+                </div>
+              )}
+              {typeof result.profile_context.ageYears === 'number' && (
+                <div className="detail-metadata-item">
+                  <span>나이</span>
+                  <strong>{result.profile_context.ageYears}세</strong>
+                </div>
+              )}
+              {result.profile_context.birthDate && (
+                <div className="detail-metadata-item">
+                  <span>생년월일</span>
+                  <strong>{result.profile_context.birthDate}</strong>
+                </div>
+              )}
+              {result.profile_context.nationality && (
+                <div className="detail-metadata-item">
+                  <span>국적</span>
+                  <strong>{formatProfileNationality(result.profile_context.nationality)}</strong>
+                </div>
+              )}
+              {result.profile_context.gender && (
+                <div className="detail-metadata-item">
+                  <span>성별</span>
+                  <strong>{formatProfileGender(result.profile_context.gender)}</strong>
+                </div>
+              )}
+              {typeof result.profile_context.isMinor === 'boolean' && (
+                <div className="detail-metadata-item">
+                  <span>미성년 여부</span>
+                  <strong>{result.profile_context.isMinor ? '미성년자' : '성인'}</strong>
+                </div>
+              )}
+            </div>
+          )}
+
+          {(result.profile_considerations?.length ?? 0) > 0 && (
+            <div className="detail-highlight-list" style={{ marginTop: 12 }}>
+              {result.profile_considerations?.map((item) => (
+                <div key={item} className="detail-highlight-item">
+                  <span className="detail-highlight-dot" />
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {result.profile_guidance && (
+            <div className="detail-panel-body detail-panel-body-inline" style={{ marginTop: 16 }}>
+              <div className="detail-panel-kicker">{result.profile_guidance.title}</div>
+              <h4 className="detail-panel-title">{result.profile_guidance.summary}</h4>
+              {result.profile_guidance.items.length > 0 && (
+                <div className="detail-highlight-list">
+                  {result.profile_guidance.items.map((item) => (
+                    <div key={item} className="detail-highlight-item">
+                      <span className="detail-highlight-dot" />
+                      <span>{item}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {result.profile_guidance.note && (
+                <p className="detail-panel-sub" style={{ marginTop: 10 }}>
+                  {result.profile_guidance.note}
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
       <div className="results-grid">
         <div className="results-col">

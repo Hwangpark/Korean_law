@@ -131,11 +131,21 @@ export function createAuthHandler(service: AuthService, config: AuthConfig) {
         }
 
         const claims = await service.verifyToken(token);
+        const userId = Number(claims.sub);
+        if (!Number.isFinite(userId)) {
+          const error = new Error("Unauthorized.") as HttpError;
+          error.status = 401;
+          throw error;
+        }
+
+        const profile = await service.getUserProfile(userId);
         jsonResponse(res, config, 200, {
           user: {
-            id: Number(claims.sub),
-            email: claims.email
+            id: userId,
+            email: claims.email,
+            profile
           },
+          profile,
           tokenType: "Bearer",
           token_type: "Bearer"
         }, req);

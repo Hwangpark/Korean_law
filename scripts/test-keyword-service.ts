@@ -51,9 +51,17 @@ async function main(): Promise<void> {
   });
 
   const result = await service.verifyKeyword({
-    query: "패드립",
+    query: "니 애미",
     contextType: "game_chat",
-    limit: 3
+    limit: 3,
+    profileContext: {
+      birthDate: "2010-01-01",
+      nationality: "foreign",
+      ageYears: 16,
+      ageBand: "child",
+      isMinor: true,
+      legalNotes: ["미성년자 검토 필요"]
+    }
   });
 
   if (!result.legal_analysis) {
@@ -66,6 +74,14 @@ async function main(): Promise<void> {
 
   if (result.reference_library.items.length === 0) {
     throw new Error("expected reference_library items.");
+  }
+
+  if (result.plan.candidate_issues[0]?.type !== "모욕") {
+    throw new Error("expected insult query to map to 모욕.");
+  }
+
+  if ((result.legal_analysis.profile_considerations?.length ?? 0) === 0) {
+    throw new Error("expected profile considerations.");
   }
 
   process.stdout.write("Keyword service contract checks passed.\n");

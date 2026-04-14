@@ -30,6 +30,36 @@ interface KeywordVerificationServiceDeps {
   keywordStore: KeywordVerificationStore;
 }
 
+function buildProfileConsiderations(profileContext?: KeywordVerificationRequest["profileContext"]): string[] {
+  if (!profileContext) {
+    return [];
+  }
+
+  const considerations: string[] = [];
+
+  if (typeof profileContext.ageYears === "number") {
+    considerations.push(`${profileContext.ageYears}세 기준으로 적용 절차를 함께 확인하세요.`);
+  } else if (profileContext.ageBand) {
+    considerations.push(`${profileContext.ageBand} 기준으로 적용 절차를 함께 확인하세요.`);
+  }
+
+  if (profileContext.isMinor) {
+    considerations.push("미성년자 관련 사안은 보호자 또는 법정대리인 동행 여부를 추가 확인하세요.");
+  }
+
+  if (profileContext.nationality === "foreign") {
+    considerations.push("외국인 사용자는 여권, 외국인등록정보, 번역 필요 여부를 같이 점검하세요.");
+  }
+
+  for (const note of profileContext.legalNotes ?? []) {
+    if (typeof note === "string" && note.trim()) {
+      considerations.push(note.trim());
+    }
+  }
+
+  return [...new Set(considerations)];
+}
+
 function severityToRiskLevel(severity: "low" | "medium" | "high" | undefined): number {
   switch (severity) {
     case "high":
@@ -66,7 +96,7 @@ export function createKeywordVerificationService(
 
   return {
     async verifyKeyword(request, actor = {}) {
-      const plan = buildKeywordQueryPlan(request.query, request.contextType);
+      const plan = buildKeywordQueryPlan(request.query, request.contextType, request.profileContext);
       const limit = Math.max(1, Math.min(request.limit ?? 4, 6));
 
       const [laws, precedents] = await Promise.all([
@@ -94,8 +124,10 @@ export function createKeywordVerificationService(
       const riskLevel = severityToRiskLevel(topSeverity);
       const summary = buildVerificationHeadline(plan, matchedLaws.length + matchedPrecedents.length);
       const interpretation = buildVerificationInterpretation(plan, matchedLaws.length + matchedPrecedents.length);
+      const profileConsiderations = buildProfileConsiderations(request.profileContext);
 
       const responseWithoutId: Omit<KeywordVerificationResponse, "run_id"> = {
+        ...(request.profileContext ? { profile_context: request.profileContext } : {}),
         query: {
           original: plan.originalQuery,
           normalized: plan.normalizedQuery,
@@ -148,7 +180,9 @@ export function createKeywordVerificationService(
           disclaimer,
           reference_library: allReferences,
           law_reference_library: matchedLaws.map((item) => item.reference),
-          precedent_reference_library: matchedPrecedents.map((item) => item.reference)
+          precedent_reference_library: matchedPrecedents.map((item) => item.reference),
+          ...(request.profileContext ? { profile_context: request.profileContext } : {}),
+          ...(profileConsiderations.length > 0 ? { profile_considerations: profileConsiderations } : {})
         },
         law_reference_library: matchedLaws.map((item) => item.reference),
         precedent_reference_library: matchedPrecedents.map((item) => item.reference),
@@ -162,6 +196,7 @@ export function createKeywordVerificationService(
         providerMode: deps.providerMode,
         request,
         plan,
+        profileSnapshot: request.profileContext ?? null,
         response: responseWithoutId
       });
 

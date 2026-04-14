@@ -6,6 +6,17 @@ export type VerificationActor = {
   guestId?: string;
 };
 
+export type ProfileContext = {
+  displayName?: string;
+  birthDate?: string;
+  gender?: string;
+  nationality?: string;
+  ageYears?: number;
+  ageBand?: string;
+  isMinor?: boolean;
+  legalNotes?: string[];
+};
+
 export interface RetrievalIssueDefinition {
   type: string;
   severity: "low" | "medium" | "high";
@@ -63,6 +74,7 @@ export interface KeywordVerificationRequest {
   query: string;
   contextType: KeywordContextType;
   limit?: number;
+  profileContext?: ProfileContext;
 }
 
 export interface VerifiedReferenceCard {
@@ -78,6 +90,7 @@ export interface VerifiedReferenceCard {
 
 export interface KeywordVerificationResponse {
   run_id: string;
+  profile_context?: ProfileContext;
   query: {
     original: string;
     normalized: string;
@@ -124,6 +137,8 @@ export interface KeywordVerificationResponse {
     reference_library: ReferenceLibraryItem[];
     law_reference_library: ReferenceLibraryItem[];
     precedent_reference_library: ReferenceLibraryItem[];
+    profile_context?: ProfileContext;
+    profile_considerations?: string[];
   };
   law_reference_library: ReferenceLibraryItem[];
   precedent_reference_library: ReferenceLibraryItem[];
@@ -137,5 +152,6 @@ export interface SaveKeywordVerificationRunInput {
   providerMode: string;
   request: KeywordVerificationRequest;
   plan: KeywordQueryPlan;
+  profileSnapshot?: ProfileContext | null;
   response: Omit<KeywordVerificationResponse, "run_id">;
 }

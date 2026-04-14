@@ -7,7 +7,7 @@ async function main(): Promise<void> {
       "content-type": "application/json"
     },
     body: JSON.stringify({
-      query: "패드립",
+      query: "니 애미",
       context_type: "game_chat",
       guest_id: `test-guest-${Date.now()}`,
       limit: 3
@@ -17,6 +17,10 @@ async function main(): Promise<void> {
   const payload = await response.json();
   if (!response.ok) {
     throw new Error(`keyword verification failed with ${response.status}: ${JSON.stringify(payload)}`);
+  }
+
+  if (!String(payload.verification?.headline ?? "").includes("모욕")) {
+    throw new Error(`expected insult headline, got: ${payload.verification?.headline ?? "<empty>"}`);
   }
 
   const output = {

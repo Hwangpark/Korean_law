@@ -18,12 +18,13 @@
     "build:web": "npm --prefix apps/web run build",
     "mock:run": "node apps/api/src/cli/run-mock-analysis.mjs",
     "test:mock": "node scripts/test-pipeline.mjs",
+    "test:abuse": "tsx scripts/test-abuse-patterns.ts",
     "test:keyword": "tsx scripts/test-keyword-service.ts",
     "test:auth": "tsx scripts/test-auth.ts",
     "test:keywords": "tsx scripts/test-keyword-verification.ts",
     "test:policy": "tsx scripts/test-password-policy.ts",
     "test": "npm run test:mock",
-    "check": "npm run test:mock && npm run test:keyword && npm run test:policy && npm run typecheck && npm run web:check"
+    "check": "npm run test:mock && npm run test:abuse && npm run test:keyword && npm run test:policy && npm run typecheck && npm run web:check"
   },
   "dependencies": {
     "cheerio": "^1.1.2",

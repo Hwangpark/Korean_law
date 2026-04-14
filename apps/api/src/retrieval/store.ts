@@ -25,10 +25,15 @@ export function createKeywordVerificationStore(db: PostgresClient): KeywordVerif
         normalized_query TEXT NOT NULL,
         context_type TEXT NOT NULL,
         provider_mode TEXT NOT NULL,
+        profile_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
         plan_json JSONB NOT NULL DEFAULT '{}'::jsonb,
         response_json JSONB NOT NULL DEFAULT '{}'::jsonb,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
+    `);
+    await db.query(`
+      ALTER TABLE keyword_verification_runs
+      ADD COLUMN IF NOT EXISTS profile_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb
     `);
     await db.query(`
       CREATE INDEX IF NOT EXISTS keyword_verification_runs_user_created_idx
@@ -69,10 +74,11 @@ export function createKeywordVerificationStore(db: PostgresClient): KeywordVerif
             normalized_query,
             context_type,
             provider_mode,
+            profile_snapshot,
             plan_json,
             response_json
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
+          VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb)
           RETURNING id
         `,
         [
@@ -82,6 +88,7 @@ export function createKeywordVerificationStore(db: PostgresClient): KeywordVerif
           input.plan.normalizedQuery,
           input.request.contextType,
           input.providerMode,
+          toJson(input.profileSnapshot ?? {}),
           toJson(input.plan),
           toJson({})
         ]

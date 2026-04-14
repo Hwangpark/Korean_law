@@ -3,6 +3,7 @@ import type http from "node:http";
 import type { AuthConfig } from "../auth/config.js";
 import type { AuthService } from "../auth/service.js";
 import type { AnalysisConfig } from "../analysis/config.js";
+import { buildProfileContext } from "../analysis/profile-context.js";
 import type { AnalysisStore, GuestUsageResult } from "../analysis/store.js";
 import type { KeywordVerificationService } from "./service.js";
 import type { KeywordContextType } from "./types.js";
@@ -137,6 +138,20 @@ export function createKeywordVerificationHandler(
   analysisStore: AnalysisStore,
   keywordService: KeywordVerificationService
 ) {
+  const authProfileService = authService as AuthService & {
+    getUserProfile?: (userId: number) => Promise<Record<string, unknown> | null>;
+  };
+
+  async function loadProfileContext(userId: number): Promise<Record<string, unknown> | null> {
+    if (!authProfileService.getUserProfile) {
+      return null;
+    }
+
+    const profile = await authProfileService.getUserProfile(userId);
+    const context = buildProfileContext(profile);
+    return context ? (context as unknown as Record<string, unknown>) : null;
+  }
+
   return async function handleKeywordVerificationRequest(
     req: http.IncomingMessage,
     res: http.ServerResponse
@@ -168,17 +183,30 @@ export function createKeywordVerificationHandler(
 
       if (token) {
         const claims = await authService.verifyToken(token);
+        const profileContext = await loadProfileContext(Number(claims.sub));
         const result = await keywordService.verifyKeyword(
           {
             query,
             contextType,
-            limit
+            limit,
+            profileContext: profileContext ?? undefined
           },
           {
             userId: Number(claims.sub)
           }
         );
-        jsonResponse(res, authConfig, 200, result, req);
+        jsonResponse(
+          res,
+          authConfig,
+          200,
+          profileContext
+            ? {
+                ...result,
+                profile_context: result.profile_context ?? profileContext
+              }
+            : result,
+          req
+        );
         return true;
       }
 

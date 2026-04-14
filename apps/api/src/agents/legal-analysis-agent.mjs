@@ -47,6 +47,45 @@ function buildSummary(charges) {
     : `현재 입력에서는 ${charges.length}건의 주요 법적 쟁점이 탐지되었습니다.`;
 }
 
+function buildProfileConsiderations(profileContext, issueTypes) {
+  const considerations = [];
+
+  if (!profileContext) {
+    return considerations;
+  }
+
+  if (profileContext.displayName) {
+    considerations.push(`${profileContext.displayName} 기준으로 안내 문구를 개인화했습니다.`);
+  }
+
+  if (profileContext.ageBand || typeof profileContext.ageYears === "number") {
+    const ageLabel = profileContext.ageBand || `${profileContext.ageYears}세`;
+    considerations.push(`${ageLabel} 기준으로 적용되는 절차와 책임 범위를 함께 확인하세요.`);
+  }
+
+  if (profileContext.isMinor) {
+    considerations.push("미성년자 관련 사안은 보호자 또는 법정대리인 개입이 필요한 절차를 별도로 검토하세요.");
+  }
+
+  if (profileContext.nationality && profileContext.nationality !== "korean") {
+    considerations.push("외국인 관련 사안은 관할, 통지, 번역, 체류 정보 같은 절차 변수를 함께 확인하세요.");
+  }
+
+  if (Array.isArray(profileContext.legalNotes)) {
+    for (const note of profileContext.legalNotes) {
+      if (typeof note === "string" && note.trim()) {
+        considerations.push(note.trim());
+      }
+    }
+  }
+
+  if (issueTypes.has("개인정보 유출")) {
+    considerations.push("프로필 정보와 결합된 노출 여부를 별도로 확인해야 합니다.");
+  }
+
+  return Array.from(new Set(considerations));
+}
+
 function buildIssueCards(charges) {
   return charges.map((charge) => ({
     title: charge.charge,
@@ -74,6 +113,7 @@ export async function runLegalAnalysisAgent(
   options = {}
 ) {
   const providerMode = options.providerMode ?? "mock";
+  const profileContext = options.profileContext ?? options.userContext ?? null;
   const issueTypes = new Set(classificationResult.issues.map((issue) => issue.type));
 
   const charges = classificationResult.issues.map((issue) => {
@@ -103,6 +143,7 @@ export async function runLegalAnalysisAgent(
     "반복성 입증을 위한 추가 캡처",
     "상대방 식별 가능 정보"
   ];
+  const profileConsiderations = buildProfileConsiderations(profileContext, issueTypes);
   const disclaimer = providerMode === "live"
     ? "본 분석은 공식 법령 API와 판례 데이터를 참고한 안내이며 법적 효력은 없습니다. 구체적인 법률 자문은 변호사와 상담해야 합니다."
     : "본 분석은 mock 데이터에 기반한 참고용 초안이며 법적 효력이 없습니다. 구체적인 법률 자문은 변호사와 상담해야 합니다.";
@@ -120,6 +161,8 @@ export async function runLegalAnalysisAgent(
     issue_cards: buildIssueCards(charges),
     precedent_cards: buildPrecedentCards(precedentSearchResult.precedents),
     next_steps: recommendedActions,
+    profile_context: profileContext ?? undefined,
+    profile_considerations: profileConsiderations,
     share_text: `${summary} 자세한 검토 전까지는 원본 증거 보존과 플랫폼 신고 이력을 함께 정리하는 것이 좋습니다.`
   };
 }

@@ -1,11 +1,9 @@
+import { findMatchedKeywords, normalizeText as normalizeSearchText } from "../lib/abuse-patterns.mjs";
 import { CONTEXT_PRECEDENT_HINTS, RETRIEVAL_ISSUE_CATALOG } from "./catalog.js";
-import type { CandidateIssue, KeywordContextType, KeywordQueryPlan } from "./types.js";
+import type { CandidateIssue, KeywordContextType, KeywordQueryPlan, ProfileContext } from "./types.js";
 
 function normalizeText(value: string): string {
-  return String(value ?? "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .toLowerCase();
+  return normalizeSearchText(value);
 }
 
 function unique(values: string[]): string[] {
@@ -39,9 +37,10 @@ function buildCandidateIssues(
 ): CandidateIssue[] {
   const issues = RETRIEVAL_ISSUE_CATALOG
     .map((issue) => {
-      const matchedTerms = issue.keywords.filter((keyword) =>
-        includesEither(normalizedQuery, normalizeText(keyword)) ||
-        tokens.some((token) => includesEither(token, normalizeText(keyword)))
+      const matchedTerms = unique(
+        findMatchedKeywords(normalizedQuery, issue.keywords).concat(
+          ...tokens.map((token) => findMatchedKeywords(token, issue.keywords))
+        )
       );
 
       if (matchedTerms.length === 0) {
@@ -87,7 +86,50 @@ function buildCandidateIssues(
   ];
 }
 
-export function buildKeywordQueryPlan(query: string, contextType: KeywordContextType): KeywordQueryPlan {
+function buildProfileAwareHints(profileContext?: ProfileContext): {
+  lawQueries: string[];
+  precedentQueries: string[];
+  warnings: string[];
+} {
+  if (!profileContext) {
+    return {
+      lawQueries: [],
+      precedentQueries: [],
+      warnings: []
+    };
+  }
+
+  const lawQueries: string[] = [];
+  const precedentQueries: string[] = [];
+  const warnings: string[] = [];
+
+  if (profileContext.isMinor) {
+    lawQueries.push("미성년자", "법정대리인");
+    precedentQueries.push("미성년자 피해", "청소년 온라인 분쟁");
+    warnings.push("미성년자 사안은 보호자 또는 법정대리인 동행 여부를 함께 확인해야 합니다.");
+  }
+
+  if (profileContext.ageBand === "child") {
+    lawQueries.push("아동", "청소년");
+    precedentQueries.push("아동 온라인 모욕", "청소년 게임 채팅");
+  }
+
+  if (profileContext.nationality === "foreign") {
+    warnings.push("외국인 사용자는 신분 자료와 번역 필요 여부를 추가 확인하는 편이 안전합니다.");
+  }
+
+  return {
+    lawQueries: unique(lawQueries),
+    precedentQueries: unique(precedentQueries),
+    warnings: unique(warnings.concat(profileContext.legalNotes ?? []))
+  };
+}
+
+export function buildKeywordQueryPlan(
+  query: string,
+  contextType: KeywordContextType,
+  profileContext?: ProfileContext
+): KeywordQueryPlan {
   const normalizedQuery = normalizeText(query);
   const tokens = tokenize(query);
   const warnings: string[] = [];
@@ -101,16 +143,20 @@ export function buildKeywordQueryPlan(query: string, contextType: KeywordContext
   }
 
   const candidateIssues = buildCandidateIssues(normalizedQuery, tokens, contextType);
+  const profileHints = buildProfileAwareHints(profileContext);
   const lawQueries = unique([
     normalizedQuery,
     ...tokens,
-    ...candidateIssues.flatMap((issue) => issue.lawQueries)
+    ...candidateIssues.flatMap((issue) => issue.lawQueries),
+    ...profileHints.lawQueries
   ]);
   const precedentQueries = unique([
     normalizedQuery,
     ...tokens,
-    ...candidateIssues.flatMap((issue) => issue.precedentQueries)
+    ...candidateIssues.flatMap((issue) => issue.precedentQueries),
+    ...profileHints.precedentQueries
   ]);
+  warnings.push(...profileHints.warnings);
 
   return {
     originalQuery: query.trim(),

@@ -43,6 +43,7 @@ export interface SaveAnalysisInput {
   providerMode: string;
   result: Record<string, unknown>;
   timeline: unknown[];
+  profileSnapshot?: Record<string, unknown> | null;
 }
 
 export interface SaveReferenceLibraryInput {
@@ -135,10 +136,15 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
         provider_mode TEXT NOT NULL,
         can_sue BOOLEAN NOT NULL DEFAULT FALSE,
         risk_level SMALLINT NOT NULL DEFAULT 0,
+        profile_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
         result_json JSONB NOT NULL,
         timeline_json JSONB NOT NULL DEFAULT '[]'::jsonb,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
+    `);
+    await db.query(`
+      ALTER TABLE analysis_runs
+      ADD COLUMN IF NOT EXISTS profile_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb
     `);
     await db.query(`
       CREATE INDEX IF NOT EXISTS analysis_runs_user_created_idx
@@ -333,10 +339,11 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
           provider_mode,
           can_sue,
           risk_level,
+          profile_snapshot,
           result_json,
           timeline_json
         )
-        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb)
         RETURNING id
       `,
       [
@@ -345,6 +352,7 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
         input.providerMode,
         Boolean(legalAnalysis.can_sue),
         Number(legalAnalysis.risk_level ?? 0),
+        toJson(input.profileSnapshot ?? {}),
         toJson(input.result),
         toJson(input.timeline)
       ]

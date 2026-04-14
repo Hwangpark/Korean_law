@@ -1,3 +1,5 @@
+import { findMatchedKeywords, matchesKeywordText, normalizeText as normalizeSearchText } from "./abuse-patterns.mjs";
+
 export const ISSUE_CATALOG = [
   {
     type: "명예훼손",
@@ -23,7 +25,7 @@ export const ISSUE_CATALOG = [
     criminal: true,
     civil: true,
     charge_label: "모욕",
-    keywords: ["모욕", "병신", "쓰레기", "개새", "멍청", "정신병자"],
+    keywords: ["모욕", "병신", "쓰레기", "개새", "멍청", "정신병자", "패드립"],
     law_search_queries: ["모욕"]
   },
   {
@@ -62,9 +64,13 @@ export const SEVERITY_TO_RISK = {
 };
 
 export function normalizeText(value) {
-  return (value ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+  return normalizeSearchText(value);
 }
 
 export function matchesKeyword(text, keyword) {
-  return normalizeText(text).includes(normalizeText(keyword));
+  return matchesKeywordText(text, keyword);
+}
+
+export function findIssueKeywords(text, keywords) {
+  return findMatchedKeywords(text, keywords);
 }

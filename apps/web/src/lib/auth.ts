@@ -1,6 +1,23 @@
+export type AuthProfile = {
+  displayName?: string;
+  birthDate?: string;
+  name?: string;
+  birth_date?: string;
+  gender?: string;
+  nationality?: string;
+  ageYears?: number;
+  ageBand?: string;
+  isMinor?: boolean;
+  age_years?: number;
+  age_band?: string;
+  is_minor?: boolean;
+  [key: string]: unknown;
+};
+
 export type AuthUser = {
   id: number;
   email: string;
+  profile?: AuthProfile | null;
 };
 
 export type AuthResponse = {
@@ -109,6 +126,19 @@ export type AnalysisLegalResult = {
   reference_library?: AnalysisReferenceItem[];
   law_reference_library?: AnalysisReferenceItem[];
   precedent_reference_library?: AnalysisReferenceItem[];
+  user_profile?: AuthProfile | null;
+  profile_context?: AuthProfile | null;
+  profile_guidance?:
+    | {
+        title?: string;
+        summary?: string;
+        items?: string[];
+        note?: string;
+      }
+    | string[];
+  age_band?: string;
+  age_years?: number;
+  is_minor?: boolean;
 };
 
 export type AnalyzeCaseResponse = {
@@ -138,15 +168,21 @@ export type PasswordPolicyState = {
   valid: boolean;
 };
 
+type RawAuthUser = Partial<AuthUser> & {
+  profile?: Partial<AuthProfile> | null;
+};
+
 type RawAuthResponse = Partial<AuthResponse> & {
   accessToken?: string;
   tokenType?: string;
   expiresIn?: number;
   issuedAt?: string;
+  user?: RawAuthUser;
 };
 
 type RawMeResponse = Partial<MeResponse> & {
   tokenType?: string;
+  user?: RawAuthUser;
 };
 
 export const DEFAULT_AUTH_BASE_URL =
@@ -341,19 +377,87 @@ function normalizeAuthResponse(payload: RawAuthResponse): AuthResponse {
     throw new Error('Auth response is missing a token.');
   }
 
+  const rawUser = payload.user;
+
   return {
     token,
     token_type: payload.token_type ?? payload.tokenType ?? 'Bearer',
     expires_in: payload.expires_in ?? payload.expiresIn ?? 0,
-    user: payload.user as AuthUser,
+    user: rawUser
+      ? {
+          id: typeof rawUser.id === 'number' ? rawUser.id : 0,
+          email: typeof rawUser.email === 'string' ? rawUser.email : '',
+          profile: rawUser.profile
+            ? {
+              ...rawUser.profile,
+                displayName:
+                  typeof rawUser.profile.displayName === 'string' ? rawUser.profile.displayName : undefined,
+                name: typeof rawUser.profile.name === 'string' ? rawUser.profile.name : undefined,
+                birthDate:
+                  typeof rawUser.profile.birthDate === 'string' ? rawUser.profile.birthDate : undefined,
+                birth_date:
+                  typeof rawUser.profile.birth_date === 'string' ? rawUser.profile.birth_date : undefined,
+                gender: typeof rawUser.profile.gender === 'string' ? rawUser.profile.gender : undefined,
+                nationality:
+                  typeof rawUser.profile.nationality === 'string' ? rawUser.profile.nationality : undefined,
+                ageYears:
+                  typeof rawUser.profile.ageYears === 'number' ? rawUser.profile.ageYears : undefined,
+                ageBand:
+                  typeof rawUser.profile.ageBand === 'string' ? rawUser.profile.ageBand : undefined,
+                isMinor:
+                  typeof rawUser.profile.isMinor === 'boolean' ? rawUser.profile.isMinor : undefined,
+                age_years:
+                  typeof rawUser.profile.age_years === 'number' ? rawUser.profile.age_years : undefined,
+                age_band:
+                  typeof rawUser.profile.age_band === 'string' ? rawUser.profile.age_band : undefined,
+                is_minor:
+                  typeof rawUser.profile.is_minor === 'boolean' ? rawUser.profile.is_minor : undefined,
+              }
+            : null,
+        }
+      : { id: 0, email: '' },
     issued_at: payload.issued_at ?? payload.issuedAt ?? new Date().toISOString(),
     message: payload.message,
   };
 }
 
 function normalizeMeResponse(payload: RawMeResponse): MeResponse {
+  const rawUser = payload.user;
+
   return {
-    user: payload.user as AuthUser,
+    user: rawUser
+      ? {
+          id: typeof rawUser.id === 'number' ? rawUser.id : 0,
+          email: typeof rawUser.email === 'string' ? rawUser.email : '',
+          profile: rawUser.profile
+            ? {
+              ...rawUser.profile,
+                displayName:
+                  typeof rawUser.profile.displayName === 'string' ? rawUser.profile.displayName : undefined,
+                name: typeof rawUser.profile.name === 'string' ? rawUser.profile.name : undefined,
+                birthDate:
+                  typeof rawUser.profile.birthDate === 'string' ? rawUser.profile.birthDate : undefined,
+                birth_date:
+                  typeof rawUser.profile.birth_date === 'string' ? rawUser.profile.birth_date : undefined,
+                gender: typeof rawUser.profile.gender === 'string' ? rawUser.profile.gender : undefined,
+                nationality:
+                  typeof rawUser.profile.nationality === 'string' ? rawUser.profile.nationality : undefined,
+                ageYears:
+                  typeof rawUser.profile.ageYears === 'number' ? rawUser.profile.ageYears : undefined,
+                ageBand:
+                  typeof rawUser.profile.ageBand === 'string' ? rawUser.profile.ageBand : undefined,
+                isMinor:
+                  typeof rawUser.profile.isMinor === 'boolean' ? rawUser.profile.isMinor : undefined,
+                age_years:
+                  typeof rawUser.profile.age_years === 'number' ? rawUser.profile.age_years : undefined,
+                age_band:
+                  typeof rawUser.profile.age_band === 'string' ? rawUser.profile.age_band : undefined,
+                is_minor:
+                  typeof rawUser.profile.is_minor === 'boolean' ? rawUser.profile.is_minor : undefined,
+              }
+            : null,
+        }
+      : { id: 0, email: '' },
     token_type: payload.token_type ?? payload.tokenType ?? 'Bearer',
   };
 }
@@ -367,6 +471,16 @@ export type EmailCodeResponse = {
 export type EmailCodeVerificationResponse = {
   message: string;
   verified: boolean;
+};
+
+export type SignupPayload = {
+  email: string;
+  password: string;
+  verification_code: string;
+  name: string;
+  birth_date: string;
+  gender: string;
+  nationality: string;
 };
 
 export async function requestEmailCode(baseUrl: string, email: string): Promise<EmailCodeResponse> {
@@ -386,7 +500,10 @@ export async function verifyEmailCode(
   });
 }
 
-export async function signup(baseUrl: string, payload: { email: string; password: string; verification_code: string }) {
+export async function signup(
+  baseUrl: string,
+  payload: SignupPayload,
+) {
   const response = await requestJson<RawAuthResponse>(`${normalizeBaseUrl(baseUrl)}/auth/signup`, {
     method: 'POST',
     body: JSON.stringify(payload),

@@ -28,6 +28,7 @@ async function runStage(timeline, agent, task) {
 
 export async function runAnalysis(request, options = {}) {
   const providerMode = options.providerMode ?? process.env.LAW_PROVIDER ?? "mock";
+  const userContext = options.userContext ?? request.user_context ?? null;
   const timeline = [];
 
   const ocr = await runStage(timeline, "ocr", () => runOcrAgent(request));
@@ -39,7 +40,7 @@ export async function runAnalysis(request, options = {}) {
   ]);
 
   const legalAnalysis = await runStage(timeline, "analysis", () =>
-    runLegalAnalysisAgent(classification, lawSearch, precedentSearch, { providerMode })
+    runLegalAnalysisAgent(classification, lawSearch, precedentSearch, { providerMode, userContext })
   );
 
   return {
@@ -47,7 +48,8 @@ export async function runAnalysis(request, options = {}) {
       provider_mode: providerMode,
       generated_at: new Date().toISOString(),
       input_type: request.input_type,
-      context_type: request.context_type
+      context_type: request.context_type,
+      ...(userContext ? { profile_context: userContext } : {})
     },
     timeline,
     ocr,
