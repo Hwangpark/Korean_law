@@ -199,7 +199,7 @@ export function buildPrecedentVerificationCards(
 
   if (specificTerms.length > 0 && cards.some((entry) => entry.hasSpecificMatch)) {
     return cards
-      .filter((entry) => entry.hasSpecificMatch || entry.card.confidenceScore >= 0.55)
+      .filter((entry) => entry.hasSpecificMatch)
       .map((entry) => entry.card);
   }
 
