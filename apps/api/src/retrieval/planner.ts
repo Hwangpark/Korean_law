@@ -15,7 +15,7 @@ function tokenize(value: string): string[] {
     normalizeText(value)
       .split(/[\s,./|]+/)
       .map((item) => item.trim())
-      .filter(Boolean)
+      .filter((item) => item.length >= 2)
   );
 }
 
@@ -48,6 +48,8 @@ function buildCandidateIssues(
       }
 
       const precedentQueries = unique([
+        ...matchedTerms,
+        ...matchedTerms.map((term) => `${term} ${issue.type}`),
         issue.type,
         ...issue.lawQueries,
         ...CONTEXT_PRECEDENT_HINTS[contextType].map((hint) => `${hint} ${issue.type}`)
@@ -145,15 +147,15 @@ export function buildKeywordQueryPlan(
   const candidateIssues = buildCandidateIssues(normalizedQuery, tokens, contextType);
   const profileHints = buildProfileAwareHints(profileContext);
   const lawQueries = unique([
+    ...candidateIssues.flatMap((issue) => issue.lawQueries),
     normalizedQuery,
     ...tokens,
-    ...candidateIssues.flatMap((issue) => issue.lawQueries),
     ...profileHints.lawQueries
   ]);
   const precedentQueries = unique([
+    ...candidateIssues.flatMap((issue) => issue.precedentQueries),
     normalizedQuery,
     ...tokens,
-    ...candidateIssues.flatMap((issue) => issue.precedentQueries),
     ...profileHints.precedentQueries
   ]);
   warnings.push(...profileHints.warnings);

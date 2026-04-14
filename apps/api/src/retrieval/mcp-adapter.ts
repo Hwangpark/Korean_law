@@ -57,6 +57,12 @@ function includesAny(text: string, queries: string[]): boolean {
   });
 }
 
+function buildSpecificTerms(plan: KeywordQueryPlan): string[] {
+  return [...new Set(
+    plan.candidateIssues.flatMap((issue) => issue.matchedTerms).map((term) => normalizeText(term)).filter(Boolean)
+  )];
+}
+
 function lawSearchText(record: LawFixtureRecord): string {
   return normalizeText(
     [
@@ -83,6 +89,15 @@ function precedentSearchText(record: PrecedentFixtureRecord): string {
       ...record.topics
     ].join(" ")
   );
+}
+
+function hasStrongPrecedentMatch(record: PrecedentDocumentRecord | PrecedentFixtureRecord, plan: KeywordQueryPlan): boolean {
+  const searchable = precedentSearchText(record as PrecedentFixtureRecord);
+  const specificTerms = buildSpecificTerms(plan);
+  if (includesAny(searchable, [plan.normalizedQuery, ...plan.tokens])) {
+    return true;
+  }
+  return specificTerms.length > 0 && includesAny(searchable, specificTerms);
 }
 
 async function loadLegacyLawApi(): Promise<LegacyLawApiModule> {
@@ -220,15 +235,32 @@ export function createRetrievalAdapter(providerMode: string): RetrievalAdapter {
         Math.max(limit, 3)
       );
 
-      return uniqueBy(
-        precedents.map((record) =>
+      const liveResults = uniqueBy(
+        precedents.map((record) => sanitizePrecedentRecord(record)),
+        (record) => record.case_no
+      );
+
+      const strongLiveResults = liveResults.filter((record) => hasStrongPrecedentMatch(record, plan));
+      const fallbackFixtures = selectPrecedentFixtures(await loadPrecedentFixtures(), plan)
+        .map((record, index) =>
           sanitizePrecedentRecord({
             ...record,
-            topics
+            similarity_score: Number(Math.max(0.52, 0.88 - index * 0.1).toFixed(2))
           })
-        ),
-        (record) => record.case_no
-      ).slice(0, limit);
+        );
+
+      if (buildSpecificTerms(plan).length > 0) {
+        return uniqueBy(
+          [
+            ...strongLiveResults,
+            ...fallbackFixtures,
+            ...liveResults
+          ],
+          (record) => record.case_no
+        ).slice(0, limit);
+      }
+
+      return liveResults.slice(0, limit);
     }
   };
 }

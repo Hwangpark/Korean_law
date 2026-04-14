@@ -22,6 +22,7 @@
     "test:keyword": "tsx scripts/test-keyword-service.ts",
     "test:auth": "tsx scripts/test-auth.ts",
     "test:keywords": "tsx scripts/test-keyword-verification.ts",
+    "test:tools": "tsx scripts/test-tools.ts",
     "test:policy": "tsx scripts/test-password-policy.ts",
     "test": "npm run test:mock",
     "check": "npm run test:mock && npm run test:abuse && npm run test:keyword && npm run test:policy && npm run typecheck && npm run web:check"

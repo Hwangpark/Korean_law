@@ -31,6 +31,14 @@ function buildIssueLabels(candidateIssues: CandidateIssue[]): string[] {
     .filter(Boolean);
 }
 
+function buildSpecificTerms(plan: KeywordQueryPlan): string[] {
+  return [...new Set(
+    plan.candidateIssues
+      .flatMap((issue) => issue.matchedTerms)
+      .filter((term) => term && !buildIssueLabels(plan.candidateIssues).includes(term))
+  )];
+}
+
 function lawSearchText(law: LawDocumentRecord): string {
   return normalizeText(
     [
@@ -93,17 +101,23 @@ function scoreLaw(plan: KeywordQueryPlan, law: LawDocumentRecord): { score: numb
 function scorePrecedent(
   plan: KeywordQueryPlan,
   precedent: PrecedentDocumentRecord
-): { score: number; reason: string } {
+): { score: number; reason: string; hasSpecificMatch: boolean } {
   const searchable = precedentSearchText(precedent);
   let score = typeof precedent.similarity_score === "number" ? precedent.similarity_score * 0.4 : 0.18;
   const reasons: string[] = [];
   const directMatches = includesAny(searchable, [plan.normalizedQuery, ...plan.tokens]);
   const issueMatches = buildIssueLabels(plan.candidateIssues).filter((issue) => precedent.topics.includes(issue));
   const expandedMatches = includesAny(searchable, plan.precedentQueries);
+  const specificTerms = buildSpecificTerms(plan);
+  const specificMatches = includesAny(searchable, specificTerms);
 
   if (issueMatches.length > 0) {
     score += 0.28;
     reasons.push(`쟁점 ${issueMatches.join(", ")} 와 유사한 사건군입니다.`);
+  }
+  if (specificMatches.length > 0) {
+    score += 0.22;
+    reasons.unshift(`입력어와 직접 연결된 표현 ${specificMatches.slice(0, 2).join(", ")} 가 판례 요지에 포함됩니다.`);
   }
   if (directMatches.length > 0) {
     score += 0.18;
@@ -113,10 +127,14 @@ function scorePrecedent(
     score += 0.15;
     reasons.push(`확장 질의 ${expandedMatches.slice(0, 2).join(", ")} 로 찾은 판례입니다.`);
   }
+  if (specificTerms.length > 0 && specificMatches.length === 0 && directMatches.length === 0) {
+    score -= 0.16;
+  }
 
   return {
     score: clampScore(score),
-    reason: reasons[0] ?? "입력어와 유사한 법적 맥락의 판례입니다."
+    reason: reasons[0] ?? "입력어와 유사한 법적 맥락의 판례입니다.",
+    hasSpecificMatch: specificMatches.length > 0 || directMatches.length > 0
   };
 }
 
@@ -162,18 +180,30 @@ export function buildPrecedentVerificationCards(
   precedents: PrecedentDocumentRecord[],
   referencesByKey: Map<string, ReferenceLibraryItem>
 ): VerifiedReferenceCard[] {
-  return precedents
+  const specificTerms = buildSpecificTerms(plan);
+  const cards = precedents
     .map((precedent) => {
       const referenceKey = `precedent:${precedent.case_no}`;
       const reference = referencesByKey.get(referenceKey);
       if (!reference) {
         return null;
       }
-      const { score, reason } = scorePrecedent(plan, precedent);
-      return buildVerifiedCard("precedent", reference, score, reason);
+      const { score, reason, hasSpecificMatch } = scorePrecedent(plan, precedent);
+      return {
+        card: buildVerifiedCard("precedent", reference, score, reason),
+        hasSpecificMatch
+      };
     })
-    .filter((card): card is VerifiedReferenceCard => Boolean(card))
-    .sort((left, right) => right.confidenceScore - left.confidenceScore);
+    .filter((entry): entry is { card: VerifiedReferenceCard; hasSpecificMatch: boolean } => Boolean(entry))
+    .sort((left, right) => right.card.confidenceScore - left.card.confidenceScore);
+
+  if (specificTerms.length > 0 && cards.some((entry) => entry.hasSpecificMatch)) {
+    return cards
+      .filter((entry) => entry.hasSpecificMatch || entry.card.confidenceScore >= 0.55)
+      .map((entry) => entry.card);
+  }
+
+  return cards.map((entry) => entry.card);
 }
 
 export function buildVerificationHeadline(plan: KeywordQueryPlan, totalMatches: number): string {

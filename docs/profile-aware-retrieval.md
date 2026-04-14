@@ -40,6 +40,15 @@
   - Python FastMCP 서버 런타임 전체
   - live-only 조회
 
+## External Tool Endpoints
+- `GET /api/tools`
+- `POST /api/tools/search_law_tool`
+- `POST /api/tools/get_law_detail_tool`
+- `POST /api/tools/search_precedent_tool`
+- `POST /api/tools/get_precedent_detail_tool`
+
+외부 에이전트는 위 endpoint를 직접 사용하고, 사용자 화면은 계속 `/api/keywords/verify`, `/api/analyze`만 사용한다.
+
 ## 검증 순서
 1. `npm run test:abuse`
 2. `npm run test:keyword`
