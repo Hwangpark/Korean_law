@@ -47,6 +47,84 @@ export type AnalysisHistoryItem = {
   canSue: boolean;
 };
 
+export type AnalysisReferenceItem = {
+  id?: string;
+  kind?: 'law' | 'precedent' | string;
+  href?: string;
+  title?: string;
+  subtitle?: string;
+  summary?: string;
+  details?: string;
+  note?: string;
+  description?: string;
+  url?: string;
+  link?: string;
+  source_url?: string;
+  law_name?: string;
+  article_no?: string;
+  articleNo?: string;
+  case_no?: string;
+  caseNo?: string;
+  court?: string;
+  verdict?: string;
+  label?: string;
+  category?: string;
+  sourceMode?: string;
+  similarityScore?: number;
+  tags?: string[];
+  keywords?: string[];
+  references?: AnalysisReferenceItem[];
+  laws?: AnalysisReferenceItem[];
+  precedents?: AnalysisReferenceItem[];
+  items?: AnalysisReferenceItem[];
+};
+
+export type AnalysisLegalResult = {
+  can_sue?: boolean;
+  risk_level?: number;
+  summary?: string;
+  charges?: Array<Record<string, unknown> & {
+    charge?: string;
+    basis?: string;
+    elements_met?: string[];
+    probability?: 'high' | 'medium' | 'low';
+    expected_penalty?: string;
+    reference_library?: AnalysisReferenceItem[];
+    referenceLibrary?: AnalysisReferenceItem[];
+    references?: AnalysisReferenceItem[];
+  }>;
+  recommended_actions?: string[];
+  evidence_to_collect?: string[];
+  precedent_cards?: Array<Record<string, unknown> & {
+    case_no?: string;
+    court?: string;
+    verdict?: string;
+    summary?: string;
+    similarity_score?: number;
+    reference_library?: AnalysisReferenceItem[];
+    referenceLibrary?: AnalysisReferenceItem[];
+    references?: AnalysisReferenceItem[];
+  }>;
+  disclaimer?: string;
+  reference_library?: AnalysisReferenceItem[];
+  law_reference_library?: AnalysisReferenceItem[];
+  precedent_reference_library?: AnalysisReferenceItem[];
+};
+
+export type AnalyzeCaseResponse = {
+  legal_analysis?: AnalysisLegalResult;
+  reference_library?: {
+    items?: AnalysisReferenceItem[];
+  } | AnalysisReferenceItem[];
+  guest_id?: string;
+  guest_remaining?: number;
+  meta?: {
+    guest_id?: string;
+    guest_remaining?: number;
+  };
+  [key: string]: unknown;
+};
+
 export type GuestSession = {
   guestId: string;
   guestRemaining: number;
@@ -322,13 +400,17 @@ export function checkHealth(baseUrl: string) {
   });
 }
 
-export async function analyzeCase(baseUrl: string, token: string | null | undefined, payload: AnalyzeCasePayload) {
+export async function analyzeCase(
+  baseUrl: string,
+  token: string | null | undefined,
+  payload: AnalyzeCasePayload,
+) {
   const headers: Record<string, string> = {};
   if (token) {
     headers.authorization = `Bearer ${token}`;
   }
 
-  return requestJson<Record<string, unknown>>(`${normalizeBaseUrl(baseUrl)}/api/analyze`, {
+  return requestJson<AnalyzeCaseResponse>(`${normalizeBaseUrl(baseUrl)}/api/analyze`, {
     method: 'POST',
     headers,
     body: JSON.stringify(payload),

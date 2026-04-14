@@ -1,4 +1,14 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+
+import { config as loadDotenv } from "dotenv";
+import { Client } from "pg";
+
+if (fs.existsSync(".env.local")) {
+  loadDotenv({ path: ".env.local", override: false });
+} else if (fs.existsSync(".env")) {
+  loadDotenv({ path: ".env", override: false });
+}
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:3001";
 const DEFAULT_PASSWORD = "Park8948!";
@@ -11,6 +21,10 @@ const LOGIN_PATHS = splitCsv(
   process.env.AUTH_LOGIN_PATHS ??
     "/api/auth/login,/api/login,/auth/login,/api/auth/signin"
 );
+const REQUEST_CODE_PATHS = splitCsv(
+  process.env.AUTH_REQUEST_CODE_PATHS ??
+    "/api/auth/request-email-code,/auth/request-email-code"
+);
 
 const config = {
   baseUrl: trimTrailingSlash(process.env.AUTH_BASE_URL ?? DEFAULT_BASE_URL),
@@ -21,11 +35,12 @@ const config = {
   loginBodyJson: process.env.AUTH_LOGIN_BODY_JSON ?? "",
   emailField: process.env.AUTH_EMAIL_FIELD ?? "email",
   passwordField: process.env.AUTH_PASSWORD_FIELD ?? "password",
-  nameField: process.env.AUTH_NAME_FIELD ?? "name"
+  nameField: process.env.AUTH_NAME_FIELD ?? "name",
+  verificationField: process.env.AUTH_VERIFICATION_FIELD ?? "verification_code"
 };
 
 async function main(): Promise<void> {
-  const registerPayload = buildPayload({
+  const registerPayloadBase = buildPayload({
     template: config.registerBodyJson,
     fallback: {
       [config.emailField]: config.email,
@@ -43,6 +58,14 @@ async function main(): Promise<void> {
     },
     values: config
   });
+
+  const verificationCode = await maybeIssueVerificationCode();
+  const registerPayload = verificationCode
+    ? {
+        ...registerPayloadBase,
+        [config.verificationField]: verificationCode
+      }
+    : registerPayloadBase;
 
   const registerResponse = await postToFirstWorkingEndpoint({
     label: "register",
@@ -86,6 +109,67 @@ async function main(): Promise<void> {
       2
     )}\n`
   );
+}
+
+async function maybeIssueVerificationCode(): Promise<string | null> {
+  let requestWorked = false;
+
+  for (const path of REQUEST_CODE_PATHS) {
+    const response = await fetch(`${config.baseUrl}${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/plain;q=0.9, */*;q=0.8"
+      },
+      body: JSON.stringify({
+        [config.emailField]: config.email
+      })
+    });
+
+    if (response.status === 404) {
+      continue;
+    }
+
+    requestWorked = response.ok;
+    if (!response.ok) {
+      const bodyText = await response.text();
+      throw new Error(
+        `request-email-code failed at ${path} with ${response.status}: ${bodyText || "<empty response>"}`
+      );
+    }
+    break;
+  }
+
+  if (!requestWorked) {
+    return null;
+  }
+
+  return fetchLatestVerificationCode(config.email);
+}
+
+async function fetchLatestVerificationCode(email: string): Promise<string | null> {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    return null;
+  }
+
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+
+  try {
+    const result = await client.query<{ code: string }>(
+      `SELECT code
+       FROM email_verification_codes
+       WHERE email = $1 AND used_at IS NULL AND expires_at > NOW()
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [email]
+    );
+
+    return result.rows[0]?.code ?? null;
+  } finally {
+    await client.end();
+  }
 }
 
 async function postToFirstWorkingEndpoint(args: {

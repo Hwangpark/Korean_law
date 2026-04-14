@@ -15,6 +15,9 @@ import {
   saveGuestSession,
   saveStoredToken,
   signup,
+  type AnalyzeCaseResponse,
+  type AnalysisLegalResult,
+  type AnalysisReferenceItem,
   type AuthResponse,
   type AuthUser,
   type GuestSession,
@@ -33,6 +36,10 @@ type Charge = {
   elements_met: string[];
   probability: 'high' | 'medium' | 'low';
   expected_penalty: string;
+  reference_library?: AnalysisReferenceItem[];
+  referenceLibrary?: AnalysisReferenceItem[];
+  references?: AnalysisReferenceItem[];
+  [key: string]: unknown;
 };
 
 type PrecedentCard = {
@@ -41,6 +48,10 @@ type PrecedentCard = {
   verdict: string;
   summary: string;
   similarity_score: number;
+  reference_library?: AnalysisReferenceItem[];
+  referenceLibrary?: AnalysisReferenceItem[];
+  references?: AnalysisReferenceItem[];
+  [key: string]: unknown;
 };
 
 type AnalysisResult = {
@@ -52,21 +63,32 @@ type AnalysisResult = {
   evidence_to_collect: string[];
   precedent_cards: PrecedentCard[];
   disclaimer: string;
-};
-
-type AnalyzeResponse = {
-  legal_analysis?: AnalysisResult;
-  guest_id?: string;
-  guest_remaining?: number;
-  meta?: {
-    guest_id?: string;
-    guest_remaining?: number;
-  };
+  reference_library?: AnalysisReferenceItem[];
+  law_reference_library?: AnalysisReferenceItem[];
+  precedent_reference_library?: AnalysisReferenceItem[];
 };
 
 type PendingAnalysis = {
   text: string;
   contextType: ContextType;
+};
+
+type DetailReference = {
+  kind?: string;
+  title: string;
+  summary: string;
+  url?: string;
+  href?: string;
+  subtitle?: string;
+};
+
+type DetailPanelData = {
+  eyebrow: string;
+  title: string;
+  summary: string;
+  metadata: Array<{ label: string; value: string }>;
+  highlights: string[];
+  references: DetailReference[];
 };
 
 const CONTEXT_OPTIONS: { value: ContextType; label: string; icon: string; desc: string }[] = [
@@ -120,6 +142,350 @@ function ProbabilityPill({ prob }: { prob: 'high' | 'medium' | 'low' }) {
   return <span className={`prob-pill ${cls}`}>{label}</span>;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function getText(value: unknown): string {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return '';
+}
+
+function firstText(...values: unknown[]) {
+  for (const value of values) {
+    const text = getText(value);
+    if (text) {
+      return text;
+    }
+  }
+  return '';
+}
+
+function toTextList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => getText(item))
+    .filter((item) => item.length > 0);
+}
+
+function normalizeReferenceItem(value: unknown): DetailReference | null {
+  if (typeof value === 'string') {
+    return {
+      title: value.trim(),
+      summary: value.trim(),
+    };
+  }
+
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const title = firstText(
+    value.title,
+    value.name,
+    value.label,
+    value.law_name,
+    value.case_no,
+    value.article_no,
+    value.article,
+    value.heading,
+  );
+  const summary = firstText(
+    value.summary,
+    value.details,
+    value.description,
+    value.note,
+    value.excerpt,
+    value.text,
+    value.basis,
+    title,
+  );
+  const subtitle = firstText(value.subtitle, value.court, value.verdict, value.category);
+  const url = firstText(value.url, value.link, value.source_url, value.href);
+  const href = firstText(value.href);
+  const kind = firstText(value.kind, value.category);
+
+  if (!title && !summary) {
+    return null;
+  }
+
+  return {
+    kind: kind || undefined,
+    title: title || summary,
+    summary: summary || title,
+    subtitle: subtitle || undefined,
+    url: url || undefined,
+    href: href || undefined,
+  };
+}
+
+function collectReferenceItems(value: unknown): DetailReference[] {
+  const items: DetailReference[] = [];
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => {
+      const normalized = normalizeReferenceItem(item);
+      if (normalized) {
+        items.push(normalized);
+      }
+    });
+    return items;
+  }
+
+  if (!isRecord(value)) {
+    return items;
+  }
+
+  const nestedSources = [
+    value.reference_library,
+    value.referenceLibrary,
+    value.references,
+    value.law_reference_library,
+    value.precedent_reference_library,
+    value.laws,
+    value.precedents,
+    value.items,
+  ];
+
+  nestedSources.forEach((source) => {
+    if (Array.isArray(source)) {
+      source.forEach((item) => {
+        const normalized = normalizeReferenceItem(item);
+        if (normalized) {
+          items.push(normalized);
+        }
+      });
+    }
+  });
+
+  if (items.length === 0) {
+    const normalized = normalizeReferenceItem(value);
+    if (normalized) {
+      items.push(normalized);
+    }
+  }
+
+  return items;
+}
+
+function buildDetailPanelData(
+  eyebrow: string,
+  title: string,
+  summary: string,
+  metadata: Array<{ label: string; value: string }>,
+  highlights: string[],
+  referenceSource: unknown,
+): DetailPanelData {
+  return {
+    eyebrow,
+    title,
+    summary,
+    metadata,
+    highlights,
+    references: collectReferenceItems(referenceSource),
+  };
+}
+
+function buildChargeDetail(charge: Charge, index: number): DetailPanelData {
+  return buildDetailPanelData(
+    '탐지된 법적 쟁점',
+    charge.charge,
+    charge.basis,
+    [
+      { label: '성립 가능성', value: charge.probability === 'high' ? '높음' : charge.probability === 'medium' ? '보통' : '낮음' },
+      { label: '예상 처벌', value: charge.expected_penalty || '추가 조회 필요' },
+      { label: '우선순위', value: `#${index + 1}` },
+    ],
+    charge.elements_met,
+    {
+      reference_library: charge.reference_library,
+      referenceLibrary: charge.referenceLibrary,
+      references: charge.references,
+    },
+  );
+}
+
+function buildPrecedentDetail(precedent: PrecedentCard, index: number): DetailPanelData {
+  return buildDetailPanelData(
+    '유사 판례',
+    precedent.case_no,
+    precedent.summary,
+    [
+      { label: '법원', value: precedent.court || '미상' },
+      { label: '결론', value: precedent.verdict || '미상' },
+      { label: '유사도', value: `${Math.round((precedent.similarity_score ?? 0) * 100)}%` },
+      { label: '우선순위', value: `#${index + 1}` },
+    ],
+    [
+      precedent.case_no,
+      precedent.court,
+      precedent.verdict,
+      precedent.summary,
+    ].filter((item): item is string => Boolean(item)),
+    {
+      reference_library: precedent.reference_library,
+      referenceLibrary: precedent.referenceLibrary,
+      references: precedent.references,
+    },
+  );
+}
+
+function buildResultDetail(result: AnalysisResult): DetailPanelData | null {
+  const firstCharge = result.charges[0];
+  if (firstCharge) {
+    return buildChargeDetail(firstCharge, 0);
+  }
+
+  const firstPrecedent = result.precedent_cards[0];
+  if (firstPrecedent) {
+    return buildPrecedentDetail(firstPrecedent, 0);
+  }
+
+  const references = collectReferenceItems({
+    reference_library: result.reference_library,
+    law_reference_library: result.law_reference_library,
+    precedent_reference_library: result.precedent_reference_library,
+  });
+
+  if (references.length > 0) {
+    return {
+      eyebrow: '근거 라이브러리',
+      title: '참고 자료',
+      summary: result.summary,
+      metadata: [{ label: '참고 수', value: `${references.length}개` }],
+      highlights: [],
+      references,
+    };
+  }
+
+  return null;
+}
+
+function splitReferenceGroups(references: DetailReference[]) {
+  const law = references.filter((reference) => reference.kind === 'law');
+  const precedent = references.filter((reference) => reference.kind === 'precedent');
+
+  return {
+    law,
+    precedent,
+  };
+}
+
+function findMatchingPrecedentReferences(precedent: PrecedentCard, references: DetailReference[]) {
+  const target = precedent.case_no.trim();
+  if (!target) {
+    return references;
+  }
+
+  const matches = references.filter((reference) =>
+    reference.title.includes(target) || reference.summary.includes(target),
+  );
+
+  return matches.length > 0 ? matches : references;
+}
+
+function normalizeAnalysisResult(
+  result: AnalysisLegalResult | undefined,
+  responseReferenceLibrary: DetailReference[] = [],
+): AnalysisResult | null {
+  if (!result) {
+    return null;
+  }
+
+  const mergedTopLevelReferences = collectReferenceItems(result.reference_library);
+  const mergedLawReferences = collectReferenceItems(result.law_reference_library);
+  const mergedPrecedentReferences = collectReferenceItems(result.precedent_reference_library);
+  const allReferences =
+    responseReferenceLibrary.length > 0
+      ? responseReferenceLibrary
+      : mergedTopLevelReferences;
+  const splitReferences = splitReferenceGroups(allReferences);
+  const lawReferences = mergedLawReferences.length > 0 ? mergedLawReferences : splitReferences.law;
+  const precedentReferences =
+    mergedPrecedentReferences.length > 0 ? mergedPrecedentReferences : splitReferences.precedent;
+  const fallbackReferences = allReferences.length > 0 ? allReferences : [...lawReferences, ...precedentReferences];
+
+  return {
+    can_sue: Boolean(result.can_sue),
+    risk_level: Number(result.risk_level ?? 0),
+    summary: getText(result.summary) || '분석 결과',
+    charges: Array.isArray(result.charges)
+      ? result.charges.map((charge) => ({
+          ...charge,
+          charge: getText(charge.charge) || '법적 쟁점',
+          basis: getText(charge.basis) || '추가 조회 필요',
+          elements_met: toTextList(charge.elements_met),
+          probability:
+            charge.probability === 'high' || charge.probability === 'medium' || charge.probability === 'low'
+              ? charge.probability
+              : 'low',
+          expected_penalty: getText(charge.expected_penalty) || '추가 조회 필요',
+          reference_library: (() => {
+            const local = collectReferenceItems(charge.reference_library ?? charge.referenceLibrary ?? charge.references);
+            return local.length > 0 ? local : fallbackReferences;
+          })(),
+          referenceLibrary: (() => {
+            const local = collectReferenceItems(charge.referenceLibrary ?? charge.reference_library ?? charge.references);
+            return local.length > 0 ? local : fallbackReferences;
+          })(),
+          references: (() => {
+            const local = collectReferenceItems(charge.references ?? charge.reference_library ?? charge.referenceLibrary);
+            return local.length > 0 ? local : fallbackReferences;
+          })(),
+        }))
+      : [],
+    recommended_actions: Array.isArray(result.recommended_actions)
+      ? result.recommended_actions.map((item) => getText(item)).filter((item) => item.length > 0)
+      : [],
+    evidence_to_collect: Array.isArray(result.evidence_to_collect)
+      ? result.evidence_to_collect.map((item) => getText(item)).filter((item) => item.length > 0)
+      : [],
+    precedent_cards: Array.isArray(result.precedent_cards)
+      ? result.precedent_cards.map((precedent) => {
+          const normalizedPrecedent: PrecedentCard = {
+            ...precedent,
+            case_no: getText(precedent.case_no) || '사건번호 미상',
+            court: getText(precedent.court) || '법원 미상',
+            verdict: getText(precedent.verdict) || '미상',
+            summary: getText(precedent.summary) || '요약 없음',
+            similarity_score:
+              typeof precedent.similarity_score === 'number' && !Number.isNaN(precedent.similarity_score)
+                ? precedent.similarity_score
+                : 0,
+          };
+
+          return {
+            ...normalizedPrecedent,
+            reference_library: (() => {
+              const local = collectReferenceItems(precedent.reference_library ?? precedent.referenceLibrary ?? precedent.references);
+              return local.length > 0 ? local : findMatchingPrecedentReferences(normalizedPrecedent, precedentReferences);
+            })(),
+            referenceLibrary: (() => {
+              const local = collectReferenceItems(precedent.referenceLibrary ?? precedent.reference_library ?? precedent.references);
+              return local.length > 0 ? local : findMatchingPrecedentReferences(normalizedPrecedent, precedentReferences);
+            })(),
+            references: (() => {
+              const local = collectReferenceItems(precedent.references ?? precedent.reference_library ?? precedent.referenceLibrary);
+              return local.length > 0 ? local : findMatchingPrecedentReferences(normalizedPrecedent, precedentReferences);
+            })(),
+          };
+        })
+      : [],
+    disclaimer: getText(result.disclaimer) || '본 분석은 참고용입니다.',
+    reference_library: allReferences,
+    law_reference_library: lawReferences,
+    precedent_reference_library: precedentReferences,
+  };
+}
+
 
 function PolicyRule({ label, passed }: { label: string; passed: boolean }) {
   return (
@@ -137,6 +503,7 @@ export default function App() {
   const [agentProgress, setAgentProgress] = useState<string[]>([]);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [selectedDetail, setSelectedDetail] = useState<DetailPanelData | null>(null);
 
   const [session, setSession] = useState<{ user: AuthUser; token: string } | null>(null);
   const [guestSession, setGuestSession] = useState<GuestSession>(() => getInitialGuestSession());
@@ -200,6 +567,15 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!result) {
+      setSelectedDetail(null);
+      return;
+    }
+
+    setSelectedDetail(buildResultDetail(result));
+  }, [result]);
+
   const passwordPolicy = evaluatePasswordPolicy(authPassword);
   const canUseGuest = guestSession.guestRemaining > 0;
 
@@ -239,11 +615,14 @@ export default function App() {
           : {
               guest_id: guestSession.guestId,
             }),
-      })) as AnalyzeResponse;
+      })) as AnalyzeCaseResponse;
 
       await delay(AGENT_STEPS.length * 600 + 300);
 
-      const analysis = response.legal_analysis;
+      const analysis = normalizeAnalysisResult(
+        response.legal_analysis,
+        collectReferenceItems(response.reference_library),
+      );
       if (!analysis) {
         throw new Error('분석 결과를 불러오지 못했습니다.');
       }
@@ -331,6 +710,7 @@ export default function App() {
     setResult(null);
     setAgentProgress([]);
     setAnalysisError(null);
+    setSelectedDetail(null);
     setView('input');
   }
 
@@ -569,8 +949,17 @@ export default function App() {
                 {result.charges.map((charge, i) => (
                   <div key={i} className="charge-card">
                     <div className="charge-header">
-                      <span className="charge-name">{charge.charge}</span>
-                      <ProbabilityPill prob={charge.probability} />
+                      <div className="charge-header-main">
+                        <span className="charge-name">{charge.charge}</span>
+                        <ProbabilityPill prob={charge.probability} />
+                      </div>
+                      <button
+                        className="card-detail-btn"
+                        type="button"
+                        onClick={() => setSelectedDetail(buildChargeDetail(charge, i))}
+                      >
+                        상세 보기
+                      </button>
                     </div>
                     <div className="charge-basis">{charge.basis}</div>
                     {charge.expected_penalty && (
@@ -600,13 +989,22 @@ export default function App() {
                 {result.precedent_cards.map((p, i) => (
                   <div key={i} className="precedent-card">
                     <div className="precedent-header">
-                      <span className="precedent-no">{p.case_no}</span>
-                      <span className="precedent-court">{p.court}</span>
-                      <span
-                        className={`verdict-badge ${p.verdict === '유죄' ? 'verdict-guilty' : 'verdict-not-guilty'}`}
+                      <div className="precedent-header-main">
+                        <span className="precedent-no">{p.case_no}</span>
+                        <span className="precedent-court">{p.court}</span>
+                        <span
+                          className={`verdict-badge ${p.verdict === '유죄' ? 'verdict-guilty' : 'verdict-not-guilty'}`}
+                        >
+                          {p.verdict}
+                        </span>
+                      </div>
+                      <button
+                        className="card-detail-btn"
+                        type="button"
+                        onClick={() => setSelectedDetail(buildPrecedentDetail(p, i))}
                       >
-                        {p.verdict}
-                      </span>
+                        상세 보기
+                      </button>
                     </div>
                     {p.summary && <p className="precedent-summary">{p.summary}</p>}
                     {p.similarity_score > 0 && (
@@ -626,6 +1024,93 @@ export default function App() {
         </div>
 
         <div className="results-col results-col-side">
+          <section className="result-section result-detail-panel">
+            <div className="detail-panel-head">
+              <div>
+                <h3 className="section-title">상세 보기</h3>
+                <p className="detail-panel-sub">
+                  카드를 누르면 법령·판례 근거와 참고 정보를 확인할 수 있습니다.
+                </p>
+              </div>
+              {selectedDetail && (
+                <span className="detail-panel-count">
+                  {selectedDetail.references.length > 0
+                    ? `${selectedDetail.references.length}개 근거`
+                    : '카드 상세'}
+                </span>
+              )}
+            </div>
+
+            {selectedDetail ? (
+              <div className="detail-panel-body">
+                <div className="detail-panel-kicker">{selectedDetail.eyebrow}</div>
+                <h4 className="detail-panel-title">{selectedDetail.title}</h4>
+                <p className="detail-panel-summary">{selectedDetail.summary}</p>
+
+                {selectedDetail.metadata.length > 0 && (
+                  <div className="detail-metadata">
+                    {selectedDetail.metadata.map((meta) => (
+                      <div key={`${meta.label}-${meta.value}`} className="detail-metadata-item">
+                        <span>{meta.label}</span>
+                        <strong>{meta.value}</strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {selectedDetail.highlights.length > 0 && (
+                  <div className="detail-highlight-list">
+                    {selectedDetail.highlights.map((item) => (
+                      <div key={item} className="detail-highlight-item">
+                        <span className="detail-highlight-dot" />
+                        <span>{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {selectedDetail.references.length > 0 ? (
+                  <div className="detail-reference-list">
+                    {selectedDetail.references.map((ref) => (
+                      ref.url ? (
+                        <a
+                          key={`${ref.title}-${ref.summary}-${ref.url}`}
+                          className="detail-reference-item"
+                          href={ref.url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <div className="detail-reference-text">
+                            <strong>{ref.title}</strong>
+                            <span>{ref.summary}</span>
+                          </div>
+                          {ref.subtitle && <span className="detail-reference-subtitle">{ref.subtitle}</span>}
+                          <span className="detail-reference-link">원문</span>
+                        </a>
+                      ) : (
+                        <div key={`${ref.title}-${ref.summary}`} className="detail-reference-item detail-reference-static">
+                          <div className="detail-reference-text">
+                            <strong>{ref.title}</strong>
+                            <span>{ref.summary}</span>
+                          </div>
+                          {ref.subtitle && <span className="detail-reference-subtitle">{ref.subtitle}</span>}
+                        </div>
+                      )
+                    ))}
+                  </div>
+                ) : (
+                  <div className="detail-empty">
+                    참고 라이브러리가 없으면 카드의 핵심 정보만 우선 표시됩니다.
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="detail-empty">
+                카드의 <strong>상세 보기</strong>를 누르면 여기에서 판례와 근거를 확인할 수 있습니다.
+              </div>
+            )}
+          </section>
+
           <section className="result-section">
             <h3 className="section-title">권장 행동</h3>
             <div className="action-list">

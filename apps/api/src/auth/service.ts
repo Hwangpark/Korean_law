@@ -57,6 +57,10 @@ export function createAuthService(config: AuthConfig): AuthService {
       )
     `);
     await db.query(`
+      ALTER TABLE auth_users
+      ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT TRUE
+    `);
+    await db.query(`
       CREATE TABLE IF NOT EXISTS email_verification_codes (
         id BIGSERIAL PRIMARY KEY,
         email TEXT NOT NULL,
