@@ -18,6 +18,7 @@
     "build:web": "npm --prefix apps/web run build",
     "mock:run": "node apps/api/src/cli/run-mock-analysis.mjs",
     "test:mock": "node scripts/test-pipeline.mjs",
+    "test:keyword": "tsx scripts/test-keyword-verification.ts",
     "test:auth": "tsx scripts/test-auth.ts",
     "test:policy": "tsx scripts/test-password-policy.ts",
     "test": "npm run test:mock",

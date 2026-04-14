@@ -5,6 +5,7 @@ import { createPostgresClient } from "./auth/postgres.js";
 import { loadAnalysisConfig } from "./analysis/config.js";
 import { createAnalysisHandler } from "./analysis/http.js";
 import { createAnalysisStore } from "./analysis/store.js";
+import { createRetrievalHandler, createRetrievalStore } from "./retrieval/index.js";
 
 async function main(): Promise<void> {
   const config = loadAuthConfig();
@@ -12,16 +13,19 @@ async function main(): Promise<void> {
   const service = createAuthService(config);
   const analysisDb = createPostgresClient(config.database);
   const analysisStore = createAnalysisStore(analysisDb);
+  const retrievalStore = createRetrievalStore(analysisDb);
 
   await service.ensureSchema();
   await analysisStore.ensureSchema();
+  await retrievalStore.ensureSchema();
 
   const handler = createAuthHandler(service, config);
   const analysisHandler = createAnalysisHandler(service, config, analysisConfig, analysisStore);
+  const retrievalHandler = createRetrievalHandler(service, config, analysisConfig, retrievalStore, analysisStore);
   const server = http.createServer((req, res) => {
     void Promise.resolve()
       .then(async () => {
-        const handled = await analysisHandler(req, res);
+        const handled = (await retrievalHandler(req, res)) || (await analysisHandler(req, res));
         if (!handled) {
           await handler(req, res);
         }
