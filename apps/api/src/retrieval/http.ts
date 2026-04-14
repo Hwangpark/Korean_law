@@ -3,34 +3,34 @@ import type http from "node:http";
 import type { AuthConfig } from "../auth/config.js";
 import type { AuthService } from "../auth/service.js";
 import type { AnalysisConfig } from "../analysis/config.js";
-import type { ReferenceLibraryItem } from "../analysis/references.js";
-import { planKeywordVerification } from "./planner.js";
-import { searchLawCandidates, searchPrecedentCandidates } from "./mcp-adapter.js";
-import { scoreLawCandidate, scorePrecedentCandidate, summarizeVerification } from "./scoring.js";
-import type { RetrievalStore } from "./store.js";
-import type { KeywordVerificationOutput, KeywordVerificationRequest, RetrievalProviderMode } from "./types.js";
-
-interface ReferenceWriter {
-  saveReferenceLibrary(input: { providerMode: string; result: Record<string, unknown>; caseId?: string | null; runId?: string | null; }): Promise<ReferenceLibraryItem[]>;
-}
+import type { AnalysisStore, GuestUsageResult } from "../analysis/store.js";
+import type { KeywordVerificationService } from "./service.js";
+import type { KeywordContextType } from "./types.js";
 
 interface HttpError extends Error {
   status?: number;
 }
 
-interface VerificationPayload {
-  q?: string;
+interface VerifyPayload {
   query?: string;
-  text?: string;
-  context_type?: string;
-  provider_mode?: string;
+  context_type?: KeywordContextType;
+  guest_id?: string;
   limit?: number;
 }
+
+const ALLOWED_CONTEXT_TYPES = new Set<KeywordContextType>([
+  "community",
+  "game_chat",
+  "messenger",
+  "other"
+]);
 
 function resolveOrigin(config: AuthConfig, req: http.IncomingMessage): string {
   const origin = req.headers.origin ?? "";
   const allowed = config.corsOrigins;
-  if (allowed.includes("*") || allowed.includes(origin)) return origin || allowed[0];
+  if (allowed.includes("*") || allowed.includes(origin)) {
+    return origin || allowed[0];
+  }
   return allowed[0];
 }
 
@@ -47,8 +47,8 @@ function jsonResponse(
     "content-type": "application/json; charset=utf-8",
     "content-length": String(Buffer.byteLength(payload)),
     "access-control-allow-origin": origin,
-    "access-control-allow-headers": "content-type, authorization",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-headers": "content-type, authorization, x-guest-id",
+    "access-control-allow-methods": "POST,OPTIONS",
     "vary": "Origin"
   });
   res.end(status === 204 ? undefined : payload);
@@ -57,6 +57,7 @@ function jsonResponse(
 async function readJsonBody(req: http.IncomingMessage, limitBytes: number): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let total = 0;
+
   for await (const chunk of req) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     total += buffer.length;
@@ -81,239 +82,152 @@ async function readJsonBody(req: http.IncomingMessage, limitBytes: number): Prom
   }
 }
 
-function requestPath(req: http.IncomingMessage): string {
-  return new URL(req.url ?? "/", "http://localhost").pathname;
-}
-
 function extractBearerToken(authorizationHeader: string | undefined): string | null {
   const [scheme, token] = String(authorizationHeader ?? "").split(" ");
   return scheme === "Bearer" && token ? token : null;
 }
 
-function normalizeProviderMode(value: unknown, fallback: RetrievalProviderMode): RetrievalProviderMode {
-  const candidate = String(value ?? "").trim().toLowerCase();
-  return candidate === "live" ? "live" : candidate === "mock" ? "mock" : fallback;
+function requestPath(req: http.IncomingMessage): string {
+  return new URL(req.url ?? "/", "http://localhost").pathname;
 }
 
-function normalizeQueryPayload(payload: VerificationPayload): string {
-  return String(payload.q ?? payload.query ?? payload.text ?? "").trim();
-}
-
-function normalizeLimit(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return fallback;
-  }
-  return Math.max(1, Math.min(12, Math.trunc(parsed)));
-}
-
-function toVerificationRequest(
-  payload: VerificationPayload,
-  analysisConfig: AnalysisConfig,
-  userId: number | null
-): KeywordVerificationRequest {
-  const query = normalizeQueryPayload(payload);
-  if (!query) {
-    const error = new Error("q, query, or text field is required.") as HttpError;
+function requireString(value: unknown, message: string): string {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) {
+    const error = new Error(message) as HttpError;
     error.status = 422;
     throw error;
   }
-
-  return {
-    query,
-    contextType: String(payload.context_type ?? process.env.DEFAULT_CONTEXT_TYPE ?? "community"),
-    providerMode: normalizeProviderMode(payload.provider_mode, analysisConfig.providerMode as RetrievalProviderMode),
-    limit: normalizeLimit(payload.limit, 6),
-    userId
-  };
+  return normalized;
 }
 
-function referencePayload(
-  laws: ReturnType<typeof scoreLawCandidate>[],
-  precedents: ReturnType<typeof scorePrecedentCandidate>[]
-): Record<string, unknown> {
-  return {
-    law_search: {
-      provider: laws[0]?.provider ?? "mock",
-      laws
-    },
-    precedent_search: {
-      provider: precedents[0]?.provider ?? "mock",
-      precedents
-    }
-  };
-}
-
-async function readOptionalUserId(
-  authService: AuthService,
-  req: http.IncomingMessage
-): Promise<number | null> {
-  const token = extractBearerToken(req.headers.authorization);
-  if (!token) {
-    return null;
+function requireGuestId(value: unknown): string {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) {
+    const error = new Error("guest_id is required for guest verification.") as HttpError;
+    error.status = 422;
+    throw error;
   }
-
-  const claims = await authService.verifyToken(token);
-  const userId = Number(claims.sub);
-  return Number.isFinite(userId) ? userId : null;
+  return normalized;
 }
 
-async function runKeywordVerification(
-  authService: AuthService,
-  analysisConfig: AnalysisConfig,
-  req: http.IncomingMessage,
-  payload: VerificationPayload,
-  store: RetrievalStore,
-  referenceWriter: ReferenceWriter
-): Promise<KeywordVerificationOutput & {
-  query_run: unknown;
-  query_hits: unknown[];
-  reference_library: { items: ReferenceLibraryItem[] };
-}> {
-  const userId = await readOptionalUserId(authService, req);
-  const request = toVerificationRequest(payload, analysisConfig, userId);
-  const plan = await planKeywordVerification(request);
-  const [laws, precedents] = await Promise.all([
-    searchLawCandidates(plan),
-    searchPrecedentCandidates(plan)
-  ]);
+function parseContextType(value: unknown): KeywordContextType {
+  const normalized = String(value ?? "community").trim() as KeywordContextType;
+  if (!ALLOWED_CONTEXT_TYPES.has(normalized)) {
+    const error = new Error("context_type must be one of community, game_chat, messenger, other.") as HttpError;
+    error.status = 422;
+    throw error;
+  }
+  return normalized;
+}
 
-  const scoredLaws = laws.map((law) => scoreLawCandidate(plan, law)).sort((left, right) => right.score - left.score).slice(0, request.limit);
-  const scoredPrecedents = precedents.map((precedent) => scorePrecedentCandidate(plan, precedent)).sort((left, right) => right.score - left.score).slice(0, request.limit);
-  const verification = summarizeVerification(plan, scoredLaws, scoredPrecedents);
-  const normalizedResult = referencePayload(scoredLaws, scoredPrecedents);
-  const referenceLibrary = await referenceWriter.saveReferenceLibrary({
-    providerMode: request.providerMode,
-    result: normalizedResult
-  });
-
-  const saved = await store.saveQueryRun({
-    userId: request.userId,
-    plan,
-    verification,
-    resultCount: scoredLaws.length + scoredPrecedents.length,
-    topScore: verification.score,
-    hits: [
-      ...scoredLaws.map((law, index) => ({
-        kind: "law" as const,
-        sourceKey: `law:${law.law_name}:${law.article_no}`,
-        score: law.score,
-        rank: index + 1,
-        matchedTerms: law.matchedTerms,
-        referenceSnapshot: law as unknown as Record<string, unknown>
-      })),
-      ...scoredPrecedents.map((precedent, index) => ({
-        kind: "precedent" as const,
-        sourceKey: `precedent:${precedent.case_no}`,
-        score: precedent.score,
-        rank: scoredLaws.length + index + 1,
-        matchedTerms: precedent.matchedTerms,
-        referenceSnapshot: precedent as unknown as Record<string, unknown>
-      }))
-    ]
-  });
-
+function formatGuestUsage(usage: GuestUsageResult): Record<string, unknown> {
   return {
-    meta: {
-      provider_mode: request.providerMode,
-      generated_at: new Date().toISOString(),
-      query: request.query,
-      context_type: request.contextType
-    },
-    planner: plan,
-    verification,
-    law_search: {
-      provider: request.providerMode,
-      laws: scoredLaws
-    },
-    precedent_search: {
-      provider: request.providerMode,
-      precedents: scoredPrecedents
-    },
-    query_run: saved.run,
-    query_hits: saved.hits,
-    reference_library: {
-      items: referenceLibrary
-    }
+    guest_id: usage.guestId,
+    used: usage.usageCount,
+    limit: usage.limit,
+    remaining: usage.remaining
   };
 }
 
-export function createRetrievalHandler(
+export function createKeywordVerificationHandler(
   authService: AuthService,
   authConfig: AuthConfig,
   analysisConfig: AnalysisConfig,
-  store: RetrievalStore,
-  referenceWriter: ReferenceWriter
+  analysisStore: AnalysisStore,
+  keywordService: KeywordVerificationService
 ) {
-  return async function handleRetrievalRequest(
+  return async function handleKeywordVerificationRequest(
     req: http.IncomingMessage,
     res: http.ServerResponse
   ): Promise<boolean> {
     const pathname = requestPath(req);
 
-    if (
-      req.method === "OPTIONS" &&
-      (pathname === "/api/retrieval/verify" ||
-        pathname === "/api/retrieval/search" ||
-        pathname.startsWith("/api/retrieval/runs/"))
-    ) {
+    if (pathname !== "/api/keywords/verify") {
+      return false;
+    }
+
+    if (req.method === "OPTIONS") {
       jsonResponse(res, authConfig, 204, null, req);
       return true;
     }
 
-    if (req.method === "POST" && pathname === "/api/retrieval/verify") {
-      try {
-        const payload = (await readJsonBody(req, analysisConfig.requestBodyLimit)) as VerificationPayload;
-        const result = await runKeywordVerification(authService, analysisConfig, req, payload, store, referenceWriter);
-        jsonResponse(res, authConfig, 200, result, req);
-      } catch (error) {
-        const err = error as HttpError;
-        jsonResponse(res, authConfig, err.status ?? 500, {
-          error: err.message || "Internal server error."
-        }, req);
-      }
+    if (req.method !== "POST") {
+      jsonResponse(res, authConfig, 405, { error: "Method not allowed." }, req);
       return true;
     }
 
-    if (req.method === "GET" && pathname === "/api/retrieval/search") {
-      try {
-        const searchUrl = new URL(req.url ?? "/api/retrieval/search", "http://localhost");
-        const payload: VerificationPayload = {
-          q: searchUrl.searchParams.get("q") ?? "",
-          context_type: searchUrl.searchParams.get("context_type") ?? undefined,
-          provider_mode: searchUrl.searchParams.get("provider_mode") ?? undefined,
-          limit: Number(searchUrl.searchParams.get("limit") ?? "")
-        };
-        const result = await runKeywordVerification(authService, analysisConfig, req, payload, store, referenceWriter);
-        jsonResponse(res, authConfig, 200, result, req);
-      } catch (error) {
-        const err = error as HttpError;
-        jsonResponse(res, authConfig, err.status ?? 500, {
-          error: err.message || "Internal server error."
-        }, req);
-      }
-      return true;
-    }
+    try {
+      const payload = (await readJsonBody(req, analysisConfig.requestBodyLimit)) as VerifyPayload;
+      const query = requireString(payload.query, "query field is required.");
+      const contextType = parseContextType(payload.context_type);
+      const limit = typeof payload.limit === "number" && Number.isFinite(payload.limit)
+        ? Math.min(Math.max(Math.floor(payload.limit), 1), 6)
+        : 4;
+      const token = extractBearerToken(req.headers.authorization);
 
-    const runMatch = /^\/api\/retrieval\/runs\/([^/]+)$/.exec(pathname);
-    if (req.method === "GET" && runMatch) {
-      try {
-        const detail = await store.getRun(decodeURIComponent(runMatch[1]));
-        if (!detail) {
-          const error = new Error("Keyword verification run not found.") as HttpError;
-          error.status = 404;
-          throw error;
+      if (token) {
+        const claims = await authService.verifyToken(token);
+        const result = await keywordService.verifyKeyword(
+          {
+            query,
+            contextType,
+            limit
+          },
+          {
+            userId: Number(claims.sub)
+          }
+        );
+        jsonResponse(res, authConfig, 200, result, req);
+        return true;
+      }
+
+      const guestId = requireGuestId(req.headers["x-guest-id"] ?? payload.guest_id);
+      const guestUsage = await analysisStore.consumeGuestAnalysis(guestId, 3);
+      if (!guestUsage.allowed) {
+        jsonResponse(
+          res,
+          authConfig,
+          429,
+          {
+            error: "비로그인 사용자는 검증을 3회까지만 사용할 수 있습니다.",
+            guest_usage: formatGuestUsage(guestUsage),
+            guest_remaining: guestUsage.remaining
+          },
+          req
+        );
+        return true;
+      }
+
+      const result = await keywordService.verifyKeyword(
+        {
+          query,
+          contextType,
+          limit
+        },
+        {
+          guestId
         }
-        jsonResponse(res, authConfig, 200, detail, req);
-      } catch (error) {
-        const err = error as HttpError;
-        jsonResponse(res, authConfig, err.status ?? 500, {
-          error: err.message || "Internal server error."
-        }, req);
-      }
+      );
+
+      jsonResponse(
+        res,
+        authConfig,
+        200,
+        {
+          ...result,
+          guest_id: guestUsage.guestId,
+          guest_remaining: guestUsage.remaining
+        },
+        req
+      );
+      return true;
+    } catch (error) {
+      const err = error as HttpError;
+      jsonResponse(res, authConfig, err.status ?? 500, {
+        error: err.message || "Internal server error."
+      }, req);
       return true;
     }
-
-    return false;
   };
 }

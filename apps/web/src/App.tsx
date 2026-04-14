@@ -15,6 +15,7 @@ import {
   saveGuestSession,
   saveStoredToken,
   signup,
+  verifyKeyword,
   type AnalyzeCaseResponse,
   type AnalysisLegalResult,
   type AnalysisReferenceItem,
@@ -70,6 +71,11 @@ type AnalysisResult = {
 
 type PendingAnalysis = {
   text: string;
+  contextType: ContextType;
+};
+
+type PendingKeyword = {
+  keyword: string;
   contextType: ContextType;
 };
 
@@ -369,6 +375,43 @@ function buildResultDetail(result: AnalysisResult): DetailPanelData | null {
   return null;
 }
 
+function buildReferenceDetail(
+  reference: AnalysisReferenceItem,
+  kind: 'law' | 'precedent',
+  index: number,
+): DetailPanelData {
+  const title = firstText(
+    reference.title,
+    reference.law_name,
+    reference.case_no,
+    reference.label,
+    reference.article_no,
+  ) || (kind === 'law' ? '법령 근거' : '판례 근거');
+  const summary = firstText(
+    reference.summary,
+    reference.details,
+    reference.description,
+    reference.note,
+    reference.title,
+    reference.law_name,
+    reference.case_no,
+  ) || '참고용 근거입니다.';
+  const subtitle = firstText(reference.subtitle, reference.court, reference.verdict, reference.category);
+  const metadata = [
+    { label: '유형', value: kind === 'law' ? '법령' : '판례' },
+    { label: '우선순위', value: `#${index + 1}` },
+  ];
+
+  return {
+    eyebrow: kind === 'law' ? '매칭 법령' : '매칭 판례',
+    title,
+    summary,
+    metadata: subtitle ? [...metadata, { label: '출처', value: subtitle }] : metadata,
+    highlights: toTextList(reference.keywords ?? reference.tags),
+    references: collectReferenceItems(reference),
+  };
+}
+
 function splitReferenceGroups(references: DetailReference[]) {
   const law = references.filter((reference) => reference.kind === 'law');
   const precedent = references.filter((reference) => reference.kind === 'precedent');
@@ -486,6 +529,30 @@ function normalizeAnalysisResult(
   };
 }
 
+function selectInlineDetail(result: AnalysisResult): DetailPanelData | null {
+  const firstLawReference = result.law_reference_library?.[0];
+  if (firstLawReference) {
+    return buildReferenceDetail(firstLawReference, 'law', 0);
+  }
+
+  const firstPrecedentReference = result.precedent_reference_library?.[0];
+  if (firstPrecedentReference) {
+    return buildReferenceDetail(firstPrecedentReference, 'precedent', 0);
+  }
+
+  const firstCharge = result.charges[0];
+  if (firstCharge) {
+    return buildChargeDetail(firstCharge, 0);
+  }
+
+  const firstPrecedent = result.precedent_cards[0];
+  if (firstPrecedent) {
+    return buildPrecedentDetail(firstPrecedent, 0);
+  }
+
+  return buildResultDetail(result);
+}
+
 
 function PolicyRule({ label, passed }: { label: string; passed: boolean }) {
   return (
@@ -504,6 +571,11 @@ export default function App() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<DetailPanelData | null>(null);
+  const [keywordText, setKeywordText] = useState('');
+  const [keywordResult, setKeywordResult] = useState<AnalysisResult | null>(null);
+  const [keywordError, setKeywordError] = useState<string | null>(null);
+  const [keywordLoading, setKeywordLoading] = useState(false);
+  const [selectedKeywordDetail, setSelectedKeywordDetail] = useState<DetailPanelData | null>(null);
 
   const [session, setSession] = useState<{ user: AuthUser; token: string } | null>(null);
   const [guestSession, setGuestSession] = useState<GuestSession>(() => getInitialGuestSession());
@@ -514,6 +586,7 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [pendingAnalysis, setPendingAnalysis] = useState<PendingAnalysis | null>(null);
+  const [pendingKeyword, setPendingKeyword] = useState<PendingKeyword | null>(null);
 
   const [signupName, setSignupName] = useState('');
   const [signupBirthday, setSignupBirthday] = useState('');
@@ -575,6 +648,15 @@ export default function App() {
 
     setSelectedDetail(buildResultDetail(result));
   }, [result]);
+
+  useEffect(() => {
+    if (!keywordResult) {
+      setSelectedKeywordDetail(null);
+      return;
+    }
+
+    setSelectedKeywordDetail(selectInlineDetail(keywordResult));
+  }, [keywordResult]);
 
   const passwordPolicy = evaluatePasswordPolicy(authPassword);
   const canUseGuest = guestSession.guestRemaining > 0;
@@ -659,12 +741,69 @@ export default function App() {
     }
   }
 
+  async function runKeywordVerify(snapshot: PendingKeyword, token: string | null) {
+    setKeywordError(null);
+    setKeywordLoading(true);
+    setAuthError(null);
+
+    try {
+      const response = (await verifyKeyword(ANALYSIS_BASE_URL, token, {
+        keyword: snapshot.keyword.trim(),
+        context_type: snapshot.contextType,
+        ...(token
+          ? {}
+          : {
+              guest_id: guestSession.guestId,
+            }),
+      })) as AnalyzeCaseResponse;
+
+      const analysis = normalizeAnalysisResult(
+        response.legal_analysis,
+        collectReferenceItems(response.reference_library),
+      );
+      if (!analysis) {
+        throw new Error('검증 결과를 불러오지 못했습니다.');
+      }
+
+      if (!token) {
+        const nextRemaining =
+          typeof response.guest_remaining === 'number'
+            ? Math.max(0, response.guest_remaining)
+            : Math.max(0, guestSession.guestRemaining - 1);
+
+        setGuestSession({
+          guestId: response.guest_id ?? response.meta?.guest_id ?? guestSession.guestId,
+          guestRemaining: nextRemaining,
+        });
+      }
+
+      setKeywordResult(analysis);
+      setPendingKeyword(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '검증 중 오류가 발생했습니다.';
+      const unauthorized = /unauthorized|401/i.test(message);
+
+      if (unauthorized && token) {
+        clearStoredToken();
+        setSession(null);
+        setPendingKeyword(snapshot);
+        openLoginPage('세션이 만료되었습니다. 다시 로그인하세요.');
+        return;
+      }
+
+      setKeywordError(message);
+    } finally {
+      setKeywordLoading(false);
+    }
+  }
+
   async function handleAnalyzeClick() {
     if (!text.trim()) {
       return;
     }
 
     const snapshot = { text, contextType };
+    setPendingKeyword(null);
 
     if (session) {
       await runAnalysis(snapshot, session.token);
@@ -672,6 +811,24 @@ export default function App() {
     }
 
     setPendingAnalysis(snapshot);
+    openLoginPage(canUseGuest ? undefined : '게스트 무료 3회를 모두 사용했습니다. 로그인 또는 회원가입이 필요합니다.');
+  }
+
+  async function handleKeywordVerifyClick() {
+    const keyword = keywordText.trim();
+    if (!keyword) {
+      return;
+    }
+
+    const snapshot = { keyword, contextType };
+    setPendingAnalysis(null);
+
+    if (session) {
+      await runKeywordVerify(snapshot, session.token);
+      return;
+    }
+
+    setPendingKeyword(snapshot);
     openLoginPage(canUseGuest ? undefined : '게스트 무료 3회를 모두 사용했습니다. 로그인 또는 회원가입이 필요합니다.');
   }
 
@@ -685,6 +842,12 @@ export default function App() {
       setSession({ user: response.user, token: response.token });
       setAuthBusy(false);
       setAuthPassword('');
+      if (pendingKeyword) {
+        const snapshot = pendingKeyword;
+        setPendingKeyword(null);
+        await runKeywordVerify(snapshot, response.token);
+        return;
+      }
       if (pendingAnalysis) {
         const snapshot = pendingAnalysis;
         setPendingAnalysis(null);
@@ -699,10 +862,18 @@ export default function App() {
   }
 
   async function handleGuestContinue() {
-    if (!pendingAnalysis || guestSession.guestRemaining <= 0) return;
-    const snapshot = pendingAnalysis;
-    setPendingAnalysis(null);
-    await runAnalysis(snapshot, null);
+    if (guestSession.guestRemaining <= 0) return;
+    if (pendingKeyword) {
+      const snapshot = pendingKeyword;
+      setPendingKeyword(null);
+      await runKeywordVerify(snapshot, null);
+      return;
+    }
+    if (pendingAnalysis) {
+      const snapshot = pendingAnalysis;
+      setPendingAnalysis(null);
+      await runAnalysis(snapshot, null);
+    }
   }
 
   function handleReset() {
@@ -711,6 +882,9 @@ export default function App() {
     setAgentProgress([]);
     setAnalysisError(null);
     setSelectedDetail(null);
+    setKeywordResult(null);
+    setSelectedKeywordDetail(null);
+    setKeywordError(null);
     setView('input');
   }
 
@@ -767,6 +941,18 @@ export default function App() {
       saveStoredToken(response.token);
       setSession({ user: response.user, token: response.token });
       setAuthBusy(false);
+      if (pendingKeyword) {
+        const snapshot = pendingKeyword;
+        setPendingKeyword(null);
+        await runKeywordVerify(snapshot, response.token);
+        return;
+      }
+      if (pendingAnalysis) {
+        const snapshot = pendingAnalysis;
+        setPendingAnalysis(null);
+        await runAnalysis(snapshot, response.token);
+        return;
+      }
       setView('input');
     } catch (err) {
       setAuthBusy(false);
@@ -851,6 +1037,38 @@ export default function App() {
           <span className="analyze-arrow">→</span>
         </button>
 
+        <div className="keyword-verify">
+          <div className="section-label section-label-tight">키워드 검증</div>
+          <div className="keyword-row">
+            <input
+              className="keyword-input"
+              type="text"
+              placeholder="짧은 단어 또는 구문 입력 예: 모욕, 사기, 개인정보 유출"
+              value={keywordText}
+              onChange={(e) => setKeywordText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void handleKeywordVerifyClick();
+                }
+              }}
+            />
+            <button
+              className="keyword-btn"
+              type="button"
+              disabled={!keywordText.trim() || keywordLoading}
+              onClick={() => void handleKeywordVerifyClick()}
+            >
+              {keywordLoading ? '검증 중...' : '검증'}
+            </button>
+          </div>
+          <p className="keyword-note">
+            짧은 키워드를 넣으면 관련 법령과 판례를 빠르게 확인합니다. 비로그인 상태는 기존 분석과
+            같은 3회 게스트 제한을 따릅니다.
+          </p>
+          {keywordError && <div className="error-banner">{keywordError}</div>}
+        </div>
+
         <p className="guest-note">
           비로그인 상태에서는 게스트로 총 3회까지 사용할 수 있습니다. 남은 횟수는 우측 상단에서
           확인할 수 있습니다.
@@ -861,6 +1079,165 @@ export default function App() {
           법률 정보 제공 목적이며 법적 효력이 없습니다.
         </p>
       </div>
+
+      {keywordResult && (
+        <section className="result-section keyword-result-section">
+          <div className="keyword-result-head">
+            <div>
+              <h3 className="section-title">키워드 검증 결과</h3>
+              <p className="keyword-result-sub">
+                <strong>{keywordText.trim()}</strong> 기준으로 가까운 법령과 판례를 바로 묶었습니다.
+              </p>
+            </div>
+            <span className="keyword-result-pill">
+              {keywordResult.charges.length + keywordResult.precedent_cards.length}개 매칭
+            </span>
+          </div>
+
+          <div className="keyword-result-grid">
+            <div className="keyword-result-col">
+              <h4 className="keyword-column-title">매칭 법령</h4>
+              <div className="keyword-mini-list">
+                {(keywordResult.law_reference_library?.length
+                  ? keywordResult.law_reference_library.map((reference, index) => (
+                      <div key={`${reference.title ?? reference.law_name ?? index}`} className="keyword-mini-card">
+                        <div className="keyword-mini-card-main">
+                          <strong>{reference.title ?? reference.law_name ?? '법령 근거'}</strong>
+                          <span>{reference.summary ?? reference.note ?? '관련 법령 근거'}</span>
+                        </div>
+                        <button
+                          className="card-detail-btn"
+                          type="button"
+                          onClick={() => setSelectedKeywordDetail(buildReferenceDetail(reference, 'law', index))}
+                        >
+                          상세 보기
+                        </button>
+                      </div>
+                    ))
+                  : keywordResult.charges.map((charge, index) => (
+                      <div key={`${charge.charge}-${index}`} className="keyword-mini-card">
+                        <div className="keyword-mini-card-main">
+                          <strong>{charge.charge}</strong>
+                          <span>{charge.basis}</span>
+                        </div>
+                        <button
+                          className="card-detail-btn"
+                          type="button"
+                          onClick={() => setSelectedKeywordDetail(buildChargeDetail(charge, index))}
+                        >
+                          상세 보기
+                        </button>
+                      </div>
+                    )))}
+              </div>
+            </div>
+
+            <div className="keyword-result-col">
+              <h4 className="keyword-column-title">매칭 판례</h4>
+              <div className="keyword-mini-list">
+                {(keywordResult.precedent_reference_library?.length
+                  ? keywordResult.precedent_reference_library.map((reference, index) => (
+                      <div key={`${reference.title ?? reference.case_no ?? index}`} className="keyword-mini-card">
+                        <div className="keyword-mini-card-main">
+                          <strong>{reference.title ?? reference.case_no ?? '판례 근거'}</strong>
+                          <span>{reference.summary ?? reference.details ?? '관련 판례 근거'}</span>
+                        </div>
+                        <button
+                          className="card-detail-btn"
+                          type="button"
+                          onClick={() => setSelectedKeywordDetail(buildReferenceDetail(reference, 'precedent', index))}
+                        >
+                          상세 보기
+                        </button>
+                      </div>
+                    ))
+                  : keywordResult.precedent_cards.map((precedent, index) => (
+                      <div key={`${precedent.case_no}-${index}`} className="keyword-mini-card">
+                        <div className="keyword-mini-card-main">
+                          <strong>{precedent.case_no}</strong>
+                          <span>{precedent.summary}</span>
+                        </div>
+                        <button
+                          className="card-detail-btn"
+                          type="button"
+                          onClick={() => setSelectedKeywordDetail(buildPrecedentDetail(precedent, index))}
+                        >
+                          상세 보기
+                        </button>
+                      </div>
+                    )))}
+              </div>
+            </div>
+          </div>
+
+          <div className="keyword-detail-shell">
+            {selectedKeywordDetail ? (
+              <div className="detail-panel-body detail-panel-body-inline">
+                <div className="detail-panel-kicker">{selectedKeywordDetail.eyebrow}</div>
+                <h4 className="detail-panel-title">{selectedKeywordDetail.title}</h4>
+                <p className="detail-panel-summary">{selectedKeywordDetail.summary}</p>
+
+                {selectedKeywordDetail.metadata.length > 0 && (
+                  <div className="detail-metadata">
+                    {selectedKeywordDetail.metadata.map((meta) => (
+                      <div key={`${meta.label}-${meta.value}`} className="detail-metadata-item">
+                        <span>{meta.label}</span>
+                        <strong>{meta.value}</strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {selectedKeywordDetail.highlights.length > 0 && (
+                  <div className="detail-highlight-list">
+                    {selectedKeywordDetail.highlights.map((item) => (
+                      <div key={item} className="detail-highlight-item">
+                        <span className="detail-highlight-dot" />
+                        <span>{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {selectedKeywordDetail.references.length > 0 ? (
+                  <div className="detail-reference-list">
+                    {selectedKeywordDetail.references.map((ref) =>
+                      ref.url ? (
+                        <a
+                          key={`${ref.title}-${ref.summary}-${ref.url}`}
+                          className="detail-reference-item"
+                          href={ref.url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <div className="detail-reference-text">
+                            <strong>{ref.title}</strong>
+                            <span>{ref.summary}</span>
+                          </div>
+                          {ref.subtitle && <span className="detail-reference-subtitle">{ref.subtitle}</span>}
+                          <span className="detail-reference-link">원문</span>
+                        </a>
+                      ) : (
+                        <div key={`${ref.title}-${ref.summary}`} className="detail-reference-item detail-reference-static">
+                          <div className="detail-reference-text">
+                            <strong>{ref.title}</strong>
+                            <span>{ref.summary}</span>
+                          </div>
+                          {ref.subtitle && <span className="detail-reference-subtitle">{ref.subtitle}</span>}
+                        </div>
+                      ),
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="detail-empty">
+                검증된 키워드를 누르면 이 영역에서 관련 법령과 판례 상세를 확인할 수 있습니다.
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       <div className="how-it-works">
         <div className="hiw-step">

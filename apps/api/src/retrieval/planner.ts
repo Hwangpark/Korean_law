@@ -1,85 +1,125 @@
-import type { KeywordVerificationPlan, PlannedIssue, RetrievalProviderMode } from "./types.js";
+import { CONTEXT_PRECEDENT_HINTS, RETRIEVAL_ISSUE_CATALOG } from "./catalog.js";
+import type { CandidateIssue, KeywordContextType, KeywordQueryPlan } from "./types.js";
 
-interface IssueCatalogEntry {
-  type: string;
-  severity: "low" | "medium" | "high";
-  criminal: boolean;
-  civil: boolean;
-  charge_label: string;
-  keywords: string[];
-  law_search_queries: string[];
+function normalizeText(value: string): string {
+  return String(value ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
 }
 
-function toTokens(query: string): string[] {
-  return [...new Set(
-    query
-      .split(" ")
-      .map((token) => token.trim())
-      .filter((token) => token.length > 0)
-  )] as string[];
+function unique(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
 }
 
-function scoreIssue(issue: IssueCatalogEntry, normalizedQuery: string): PlannedIssue | null {
-  const matchedKeywords = issue.keywords.filter((keyword) => normalizedQuery.includes(keyword.toLowerCase()));
-  const matchedQueries = issue.law_search_queries.filter((keyword) => normalizedQuery.includes(keyword.toLowerCase()));
-  if (matchedKeywords.length === 0 && matchedQueries.length === 0 && !normalizedQuery.includes(issue.type.toLowerCase())) {
-    return null;
+function tokenize(value: string): string[] {
+  return unique(
+    normalizeText(value)
+      .split(/[\s,./|]+/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+  );
+}
+
+function includesEither(left: string, right: string): boolean {
+  return left.includes(right) || right.includes(left);
+}
+
+function buildReason(type: string, matchedTerms: string[], contextType: KeywordContextType): string {
+  const matched = matchedTerms.length > 0
+    ? `입력어가 ${matchedTerms.join(", ")} 표현과 겹칩니다.`
+    : "유사 사건군으로 분류했습니다.";
+  return `${type} 쟁점으로 검토합니다. ${matched} 맥락은 ${contextType} 로 반영했습니다.`;
+}
+
+function buildCandidateIssues(
+  normalizedQuery: string,
+  tokens: string[],
+  contextType: KeywordContextType
+): CandidateIssue[] {
+  const issues = RETRIEVAL_ISSUE_CATALOG
+    .map((issue) => {
+      const matchedTerms = issue.keywords.filter((keyword) =>
+        includesEither(normalizedQuery, normalizeText(keyword)) ||
+        tokens.some((token) => includesEither(token, normalizeText(keyword)))
+      );
+
+      if (matchedTerms.length === 0) {
+        return null;
+      }
+
+      const precedentQueries = unique([
+        issue.type,
+        ...issue.lawQueries,
+        ...CONTEXT_PRECEDENT_HINTS[contextType].map((hint) => `${hint} ${issue.type}`)
+      ]);
+
+      return {
+        type: issue.type,
+        severity: issue.severity,
+        matchedTerms,
+        lawQueries: unique([...issue.lawQueries, issue.type]),
+        precedentQueries,
+        reason: buildReason(issue.type, matchedTerms, contextType)
+      } satisfies CandidateIssue;
+    })
+    .filter((issue): issue is CandidateIssue => Boolean(issue));
+
+  if (issues.length > 0) {
+    return issues;
   }
 
-  return {
-    type: issue.type,
-    severity: issue.severity,
-    criminal: issue.criminal,
-    civil: issue.civil,
-    chargeLabel: issue.charge_label,
-    matchedKeywords: [...new Set([...matchedKeywords, ...matchedQueries])],
-    lawSearchQueries: [...new Set([issue.type, ...issue.law_search_queries])]
-  };
-}
-
-async function loadIssueCatalog(): Promise<{
-  ISSUE_CATALOG: IssueCatalogEntry[];
-  normalizeText(value: unknown): string;
-}> {
-  // @ts-expect-error Legacy runtime module is still implemented in .mjs.
-  const module = await import("../lib/issue-catalog.mjs");
-  return module as {
-    ISSUE_CATALOG: IssueCatalogEntry[];
-    normalizeText(value: unknown): string;
-  };
-}
-
-export async function planKeywordVerification(input: {
-  query: string;
-  contextType: string;
-  providerMode: RetrievalProviderMode;
-  limit: number;
-}): Promise<KeywordVerificationPlan> {
-  const { ISSUE_CATALOG, normalizeText } = await loadIssueCatalog();
-  const normalizedQuery = normalizeText(input.query);
-  const tokens = toTokens(normalizedQuery);
-  const matchedIssues = ISSUE_CATALOG.map((issue) => scoreIssue(issue, normalizedQuery)).filter(Boolean) as PlannedIssue[];
-  const searchQueries = [
-    ...tokens,
-    ...matchedIssues.flatMap((issue) => issue.lawSearchQueries),
-    ...matchedIssues.flatMap((issue) => issue.matchedKeywords)
-  ];
-
-  const uniqueQueries = [...new Set(searchQueries)].filter(Boolean) as string[];
-  const rationale =
-    matchedIssues.length > 0
-      ? `입력어가 ${matchedIssues.map((issue) => issue.type).join(", ")} 계열 이슈와 맞닿아 있습니다.`
-      : "명시적 이슈 일치는 없어서 일반 키워드 검색으로 확장합니다.";
-
-  return {
-    query: input.query,
+  const fallbackQueries = unique([
     normalizedQuery,
-    contextType: input.contextType,
-    providerMode: input.providerMode,
-    limit: input.limit,
+    ...tokens,
+    ...CONTEXT_PRECEDENT_HINTS[contextType].map((hint) => `${hint} ${normalizedQuery}`)
+  ]);
+
+  return [
+    {
+      type: "일반 키워드 검증",
+      severity: "low",
+      matchedTerms: tokens.length > 0 ? tokens : [normalizedQuery],
+      lawQueries: fallbackQueries,
+      precedentQueries: fallbackQueries,
+      reason: "사전 분류되지 않은 표현이어서 일반 키워드 검색으로 확장합니다."
+    }
+  ];
+}
+
+export function buildKeywordQueryPlan(query: string, contextType: KeywordContextType): KeywordQueryPlan {
+  const normalizedQuery = normalizeText(query);
+  const tokens = tokenize(query);
+  const warnings: string[] = [];
+
+  if (normalizedQuery.length < 2) {
+    warnings.push("입력어가 너무 짧아 검색 결과가 부정확할 수 있습니다.");
+  }
+
+  if (tokens.length === 1) {
+    warnings.push("단어 하나만으로는 공연성, 반복성, 고의성 판단이 어렵습니다.");
+  }
+
+  const candidateIssues = buildCandidateIssues(normalizedQuery, tokens, contextType);
+  const lawQueries = unique([
+    normalizedQuery,
+    ...tokens,
+    ...candidateIssues.flatMap((issue) => issue.lawQueries)
+  ]);
+  const precedentQueries = unique([
+    normalizedQuery,
+    ...tokens,
+    ...candidateIssues.flatMap((issue) => issue.precedentQueries)
+  ]);
+
+  return {
+    originalQuery: query.trim(),
+    normalizedQuery,
+    contextType,
     tokens,
-    matchedIssues,
-    searchQueries: uniqueQueries.length > 0 ? uniqueQueries : tokens,
-    rationale
+    candidateIssues,
+    lawQueries,
+    precedentQueries,
+    warnings
   };
 }

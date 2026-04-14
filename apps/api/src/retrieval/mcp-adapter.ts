@@ -1,205 +1,234 @@
-import type { KeywordVerificationPlan, LawCandidate, PrecedentCandidate, RetrievalProviderMode } from "./types.js";
+import type {
+  KeywordQueryPlan,
+  LawDocumentRecord,
+  PrecedentDocumentRecord
+} from "./types.js";
 
-const OFFICIAL_LAW_NAME_ALIASES: Record<string, string> = {
-  형법: "형법",
-  정보통신망법: "정보통신망 이용촉진 및 정보보호 등에 관한 법률",
-  개인정보보호법: "개인정보 보호법",
-  "스토킹범죄의 처벌 등에 관한 법률": "스토킹범죄의 처벌 등에 관한 법률"
-};
-
-function normalizeText(value: string): string {
-  return String(value ?? "").toLowerCase().replace(/\s+/g, " ").trim();
-}
-
-function matchesAny(text: string, values: string[]): boolean {
-  const normalized = normalizeText(text);
-  return values.some((value) => normalized.includes(normalizeText(value)));
-}
-
-function scoreOverlap(values: string[], plan: KeywordVerificationPlan): number {
-  const normalizedTokens = new Set(plan.searchQueries.map((value) => normalizeText(value)));
-  const matches = values.filter((value) => normalizedTokens.has(normalizeText(value)));
-  return matches.length / Math.max(values.length, 1);
-}
-
-async function loadRepoHelpers(): Promise<{
-  loadRepoJson(relativePath: string): Promise<unknown>;
-  uniqueBy<T>(items: T[], keyFn: (item: T) => string): T[];
-}> {
-  // @ts-expect-error Legacy runtime module is still implemented in .mjs.
-  const module = await import("../lib/load-json.mjs");
-  return module as {
-    loadRepoJson(relativePath: string): Promise<unknown>;
-    uniqueBy<T>(items: T[], keyFn: (item: T) => string): T[];
-  };
-}
-
-async function loadLawApiHelpers(): Promise<{
-  fetchLawArticleByName(lawName: string, articleNo: string): Promise<Record<string, unknown> | null>;
-  searchPrecedentsByQueries(
+type LegacyLawApiModule = {
+  fetchLawArticleByName: (lawName: string, articleNo: string) => Promise<Record<string, unknown> | null>;
+  searchPrecedentsByQueries: (
     queries: string[],
     topics: string[],
     limit?: number
-  ): Promise<Record<string, unknown>[]>;
-}> {
-  // @ts-expect-error Legacy runtime module is still implemented in .mjs.
-  const module = await import("../lib/law-open-api.mjs");
-  return module as {
-    fetchLawArticleByName(lawName: string, articleNo: string): Promise<Record<string, unknown> | null>;
-    searchPrecedentsByQueries(
-      queries: string[],
-      topics: string[],
-      limit?: number
-    ): Promise<Record<string, unknown>[]>;
-  };
+  ) => Promise<Record<string, unknown>[]>;
+};
+
+type LegacyJsonModule = {
+  loadRepoJson: (relativePath: string) => Promise<unknown>;
+};
+
+interface LawFixtureRecord extends LawDocumentRecord {
+  topics: string[];
+  queries: string[];
 }
 
-function toLawCandidate(value: Record<string, unknown>, provider: RetrievalProviderMode): LawCandidate {
-  return {
-    law_name: String(value.law_name ?? ""),
-    article_no: String(value.article_no ?? ""),
-    article_title: String(value.article_title ?? ""),
-    content: String(value.content ?? ""),
-    penalty: String(value.penalty ?? ""),
-    is_complaint_required: Boolean(value.is_complaint_required),
-    url: String(value.url ?? ""),
-    topics: Array.isArray(value.topics) ? value.topics.map((topic) => String(topic)) : [],
-    queries: Array.isArray(value.queries) ? value.queries.map((query) => String(query)) : [],
-    provider
-  };
+interface PrecedentFixtureRecord extends PrecedentDocumentRecord {
+  topics: string[];
 }
 
-function toPrecedentCandidate(value: Record<string, unknown>, provider: RetrievalProviderMode): PrecedentCandidate {
-  return {
-    case_no: String(value.case_no ?? ""),
-    court: String(value.court ?? ""),
-    date: String(value.date ?? ""),
-    summary: String(value.summary ?? ""),
-    verdict: String(value.verdict ?? ""),
-    sentence: String(value.sentence ?? ""),
-    key_reasoning: String(value.key_reasoning ?? ""),
-    similarity_score: Number(value.similarity_score ?? 0),
-    url: String(value.url ?? ""),
-    topics: Array.isArray(value.topics) ? value.topics.map((topic) => String(topic)) : [],
-    provider
-  };
+export interface RetrievalAdapter {
+  searchLaws(plan: KeywordQueryPlan, limit: number): Promise<LawDocumentRecord[]>;
+  searchPrecedents(plan: KeywordQueryPlan, limit: number): Promise<PrecedentDocumentRecord[]>;
 }
 
-async function loadLawFixtures(): Promise<LawCandidate[]> {
-  const { loadRepoJson } = await loadRepoHelpers();
-  const laws = await loadRepoJson("fixtures/providers/laws.json");
-  const rows = Array.isArray(laws) ? (laws as Record<string, unknown>[]) : [];
-  return rows.map((law) => toLawCandidate(law, "mock"));
+function normalizeText(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
 }
 
-async function loadPrecedentFixtures(): Promise<PrecedentCandidate[]> {
-  const { loadRepoJson } = await loadRepoHelpers();
-  const precedents = await loadRepoJson("fixtures/providers/precedents.json");
-  const rows = Array.isArray(precedents) ? (precedents as Record<string, unknown>[]) : [];
-  return rows.map((precedent) => toPrecedentCandidate(precedent, "mock"));
-}
-
-function filterLawFixtures(laws: LawCandidate[], plan: KeywordVerificationPlan): LawCandidate[] {
-  const normalizedQueries = plan.searchQueries.map((query) => normalizeText(query));
-  return laws.filter((law) => {
-    const searchable = [
-      law.law_name,
-      law.article_no,
-      law.article_title,
-      law.content,
-      law.penalty,
-      ...law.topics,
-      ...law.queries
-    ];
-    return searchable.some((value) => matchesAny(value, normalizedQueries));
+function uniqueBy<T>(items: T[], keyFn: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = keyFn(item);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
   });
 }
 
-function filterPrecedentFixtures(precedents: PrecedentCandidate[], plan: KeywordVerificationPlan): PrecedentCandidate[] {
-  const normalizedQueries = plan.searchQueries.map((query) => normalizeText(query));
-  return precedents
-    .map((precedent) => {
-      const searchable = [
-        precedent.case_no,
-        precedent.court,
-        precedent.summary,
-        precedent.verdict,
-        precedent.sentence,
-        precedent.key_reasoning,
-        ...precedent.topics
-      ];
-      const matched = searchable.some((value) => matchesAny(value, normalizedQueries));
-      if (!matched) {
-        return null;
-      }
-
-      const overlapScore = scoreOverlap(precedent.topics.length > 0 ? precedent.topics : normalizedQueries, plan);
-      return {
-        ...precedent,
-        similarity_score: Number(Math.max(precedent.similarity_score ?? 0, overlapScore).toFixed(2))
-      };
-    })
-    .filter((precedent): precedent is PrecedentCandidate => Boolean(precedent));
+function includesAny(text: string, queries: string[]): boolean {
+  return queries.some((query) => {
+    const normalizedQuery = normalizeText(query);
+    return normalizedQuery && (text.includes(normalizedQuery) || normalizedQuery.includes(text));
+  });
 }
 
-function uniqueLawKey(law: LawCandidate): string {
-  return `${law.law_name}:${law.article_no}`;
-}
-
-export async function searchLawCandidates(
-  plan: KeywordVerificationPlan
-): Promise<LawCandidate[]> {
-  const fixtures = await loadLawFixtures();
-  const matched = filterLawFixtures(fixtures, plan);
-  const { uniqueBy } = await loadRepoHelpers();
-
-  if (plan.providerMode === "mock") {
-    return uniqueBy(matched, uniqueLawKey).slice(0, plan.limit);
-  }
-
-  const { fetchLawArticleByName } = await loadLawApiHelpers();
-  const hydrated = await Promise.all(
-    uniqueBy(matched, uniqueLawKey).map(async (law) => {
-      const officialLawName = OFFICIAL_LAW_NAME_ALIASES[law.law_name] ?? law.law_name;
-      try {
-        const article = await fetchLawArticleByName(officialLawName, law.article_no);
-        if (!article) {
-          return {
-            ...law,
-            provider: "live" as const
-          };
-        }
-
-        return {
-          ...law,
-          ...article,
-          provider: "live" as const
-        };
-      } catch {
-        return {
-          ...law,
-          provider: "live" as const
-        };
-      }
-    })
+function lawSearchText(record: LawFixtureRecord): string {
+  return normalizeText(
+    [
+      record.law_name,
+      record.article_no,
+      record.article_title,
+      record.content,
+      record.penalty,
+      ...record.topics,
+      ...record.queries
+    ].join(" ")
   );
-
-  return hydrated.slice(0, plan.limit);
 }
 
-export async function searchPrecedentCandidates(
-  plan: KeywordVerificationPlan
-): Promise<PrecedentCandidate[]> {
-  const fixturePrecedents = await loadPrecedentFixtures();
+function precedentSearchText(record: PrecedentFixtureRecord): string {
+  return normalizeText(
+    [
+      record.case_no,
+      record.court,
+      record.summary,
+      record.verdict,
+      record.sentence,
+      record.key_reasoning,
+      ...record.topics
+    ].join(" ")
+  );
+}
 
-  if (plan.providerMode === "mock") {
-    return filterPrecedentFixtures(fixturePrecedents, plan)
-      .sort((left, right) => right.similarity_score - left.similarity_score)
-      .slice(0, plan.limit);
-  }
+async function loadLegacyLawApi(): Promise<LegacyLawApiModule> {
+  const mod = await import("../lib/law-open-api.mjs");
+  return mod as unknown as LegacyLawApiModule;
+}
 
-  const topics = plan.matchedIssues.flatMap((issue) => [issue.type, ...issue.lawSearchQueries]);
-  const { searchPrecedentsByQueries } = await loadLawApiHelpers();
-  const livePrecedents = await searchPrecedentsByQueries(plan.searchQueries, topics, plan.limit);
-  return livePrecedents.map((precedent) => toPrecedentCandidate(precedent, "live"));
+async function loadLegacyJson(): Promise<LegacyJsonModule> {
+  const mod = await import("../lib/load-json.mjs");
+  return mod as unknown as LegacyJsonModule;
+}
+
+async function loadLawFixtures(): Promise<LawFixtureRecord[]> {
+  const { loadRepoJson } = await loadLegacyJson();
+  return (await loadRepoJson("fixtures/providers/laws.json")) as LawFixtureRecord[];
+}
+
+async function loadPrecedentFixtures(): Promise<PrecedentFixtureRecord[]> {
+  const { loadRepoJson } = await loadLegacyJson();
+  return (await loadRepoJson("fixtures/providers/precedents.json")) as PrecedentFixtureRecord[];
+}
+
+function selectLawFixtures(fixtures: LawFixtureRecord[], plan: KeywordQueryPlan): LawFixtureRecord[] {
+  const issueTypes = new Set(plan.candidateIssues.map((issue) => issue.type));
+  const searchQueries = [...plan.lawQueries, ...plan.precedentQueries];
+
+  return fixtures.filter((record) => {
+    const searchable = lawSearchText(record);
+    return (
+      record.topics.some((topic) => issueTypes.has(topic)) ||
+      includesAny(searchable, searchQueries) ||
+      record.queries.some((query) => includesAny(normalizeText(query), searchQueries))
+    );
+  });
+}
+
+function selectPrecedentFixtures(fixtures: PrecedentFixtureRecord[], plan: KeywordQueryPlan): PrecedentFixtureRecord[] {
+  const issueTypes = new Set(plan.candidateIssues.map((issue) => issue.type));
+  const searchQueries = [...plan.precedentQueries, ...plan.lawQueries];
+
+  return fixtures.filter((record) => {
+    const searchable = precedentSearchText(record);
+    return (
+      record.topics.some((topic) => issueTypes.has(topic)) ||
+      includesAny(searchable, searchQueries)
+    );
+  });
+}
+
+function sanitizeLawRecord(record: Partial<LawDocumentRecord>): LawDocumentRecord {
+  return {
+    law_name: String(record.law_name ?? "").trim(),
+    article_no: String(record.article_no ?? "").trim(),
+    article_title: String(record.article_title ?? "").trim(),
+    content: String(record.content ?? "").trim(),
+    penalty: String(record.penalty ?? "").trim(),
+    url: String(record.url ?? "").trim(),
+    topics: Array.isArray(record.topics) ? record.topics.map((item) => String(item)) : [],
+    queries: Array.isArray(record.queries) ? record.queries.map((item) => String(item)) : [],
+    is_complaint_required: Boolean(record.is_complaint_required)
+  };
+}
+
+function sanitizePrecedentRecord(record: Partial<PrecedentDocumentRecord>): PrecedentDocumentRecord {
+  return {
+    case_no: String(record.case_no ?? "").trim(),
+    court: String(record.court ?? "").trim(),
+    date: String(record.date ?? "").trim(),
+    summary: String(record.summary ?? "").trim(),
+    verdict: String(record.verdict ?? "").trim(),
+    sentence: String(record.sentence ?? "").trim(),
+    key_reasoning: String(record.key_reasoning ?? "").trim(),
+    url: String(record.url ?? "").trim(),
+    topics: Array.isArray(record.topics) ? record.topics.map((item) => String(item)) : [],
+    similarity_score: typeof record.similarity_score === "number" ? record.similarity_score : undefined
+  };
+}
+
+export function createRetrievalAdapter(providerMode: string): RetrievalAdapter {
+  return {
+    async searchLaws(plan, limit) {
+      const lawFixtures = selectLawFixtures(await loadLawFixtures(), plan).slice(0, Math.max(limit * 2, 6));
+
+      if (providerMode !== "live") {
+        return uniqueBy(
+          lawFixtures.slice(0, limit).map((record) => sanitizeLawRecord(record)),
+          (record) => `${record.law_name}:${record.article_no}`
+        );
+      }
+
+      const { fetchLawArticleByName } = await loadLegacyLawApi();
+      const hydrated = await Promise.all(
+        lawFixtures.map(async (record) => {
+          try {
+            const article = await fetchLawArticleByName(record.law_name, record.article_no);
+            if (!article) {
+              return sanitizeLawRecord(record);
+            }
+
+            return sanitizeLawRecord({
+              ...record,
+              ...article,
+              topics: record.topics,
+              queries: record.queries,
+              is_complaint_required: record.is_complaint_required
+            });
+          } catch {
+            return sanitizeLawRecord(record);
+          }
+        })
+      );
+
+      return uniqueBy(hydrated, (record) => `${record.law_name}:${record.article_no}`).slice(0, limit);
+    },
+
+    async searchPrecedents(plan, limit) {
+      if (providerMode !== "live") {
+        const fixtures = selectPrecedentFixtures(await loadPrecedentFixtures(), plan)
+          .slice(0, Math.max(limit * 2, 6))
+          .map((record, index) =>
+            sanitizePrecedentRecord({
+              ...record,
+              similarity_score: Number(Math.max(0.4, 0.92 - index * 0.12).toFixed(2))
+            })
+          );
+
+        return uniqueBy(fixtures, (record) => record.case_no).slice(0, limit);
+      }
+
+      const { searchPrecedentsByQueries } = await loadLegacyLawApi();
+      const topics = plan.candidateIssues.map((issue) => issue.type);
+      const precedents = await searchPrecedentsByQueries(
+        plan.precedentQueries.slice(0, 6),
+        topics,
+        Math.max(limit, 3)
+      );
+
+      return uniqueBy(
+        precedents.map((record) =>
+          sanitizePrecedentRecord({
+            ...record,
+            topics
+          })
+        ),
+        (record) => record.case_no
+      ).slice(0, limit);
+    }
+  };
 }

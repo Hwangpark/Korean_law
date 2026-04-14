@@ -1,280 +1,152 @@
 import type { PostgresClient } from "../auth/postgres.js";
-import type {
-  KeywordVerificationOutput,
-  KeywordVerificationPlan,
-  QueryHitRecord,
-  QueryRunRecord,
-  RetrievalRunDetail,
-  RetrievalKind
-} from "./types.js";
+import type { SaveKeywordVerificationRunInput } from "./types.js";
 
 interface IdRow {
   id: string;
 }
 
-interface RunRow {
-  id: string;
-  query_text: string;
-  context_type: string;
-  provider_mode: string;
-  user_id: number | null;
-  planner_json: Record<string, unknown>;
-  verification_json: Record<string, unknown>;
-  result_count: number;
-  top_score: number;
-  created_at: string;
-  updated_at: string;
-}
-
-interface HitRow {
-  id: string;
-  run_id: string;
-  kind: RetrievalKind;
-  source_key: string;
-  score: number;
-  rank: number;
-  matched_terms: string[] | string;
-  reference_snapshot: Record<string, unknown>;
-  created_at: string;
-}
-
-export interface SaveRetrievalRunInput {
-  userId: number | null;
-  plan: KeywordVerificationPlan;
-  verification: KeywordVerificationOutput["verification"];
-  resultCount: number;
-  topScore: number;
-  hits: Array<{
-    kind: RetrievalKind;
-    sourceKey: string;
-    score: number;
-    rank: number;
-    matchedTerms: string[];
-    referenceSnapshot: Record<string, unknown>;
-  }>;
-}
-
-export interface RetrievalStore {
+export interface KeywordVerificationStore {
   ensureSchema(): Promise<void>;
-  saveQueryRun(input: SaveRetrievalRunInput): Promise<RetrievalRunDetail>;
-  getRun(runId: string): Promise<RetrievalRunDetail | null>;
+  saveRun(input: SaveKeywordVerificationRunInput): Promise<string>;
 }
 
 function toJson(value: unknown): string {
   return JSON.stringify(value ?? {});
 }
 
-function parseArray(value: string[] | string): string[] {
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item));
-  }
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.map((item) => String(item)) : [String(value)];
-  } catch {
-    return [String(value)];
-  }
-}
-
-export function createRetrievalStore(db: PostgresClient): RetrievalStore {
+export function createKeywordVerificationStore(db: PostgresClient): KeywordVerificationStore {
   async function ensureSchema(): Promise<void> {
     await db.query(`
-      CREATE TABLE IF NOT EXISTS keyword_query_runs (
+      CREATE TABLE IF NOT EXISTS keyword_verification_runs (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         user_id BIGINT REFERENCES auth_users(id) ON DELETE SET NULL,
+        guest_id TEXT,
         query_text TEXT NOT NULL,
+        normalized_query TEXT NOT NULL,
         context_type TEXT NOT NULL,
         provider_mode TEXT NOT NULL,
-        planner_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-        verification_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-        result_count INTEGER NOT NULL DEFAULT 0,
-        top_score REAL NOT NULL DEFAULT 0,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      )
-    `);
-    await db.query(`
-      CREATE INDEX IF NOT EXISTS keyword_query_runs_created_idx
-      ON keyword_query_runs (created_at DESC)
-    `);
-    await db.query(`
-      CREATE INDEX IF NOT EXISTS keyword_query_runs_query_idx
-      ON keyword_query_runs USING GIN (to_tsvector('simple', query_text))
-    `);
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS keyword_query_hits (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        run_id UUID NOT NULL REFERENCES keyword_query_runs(id) ON DELETE CASCADE,
-        kind TEXT NOT NULL CHECK (kind IN ('law', 'precedent')),
-        source_key TEXT NOT NULL,
-        score REAL NOT NULL DEFAULT 0,
-        rank INTEGER NOT NULL DEFAULT 0,
-        matched_terms JSONB NOT NULL DEFAULT '[]'::jsonb,
-        reference_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+        plan_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        response_json JSONB NOT NULL DEFAULT '{}'::jsonb,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
     await db.query(`
-      CREATE INDEX IF NOT EXISTS keyword_query_hits_run_idx
-      ON keyword_query_hits (run_id, rank ASC)
+      CREATE INDEX IF NOT EXISTS keyword_verification_runs_user_created_idx
+      ON keyword_verification_runs (user_id, created_at DESC)
+    `);
+    await db.query(`
+      CREATE INDEX IF NOT EXISTS keyword_verification_runs_guest_created_idx
+      ON keyword_verification_runs (guest_id, created_at DESC)
+    `);
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS keyword_verification_hits (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        run_id UUID NOT NULL REFERENCES keyword_verification_runs(id) ON DELETE CASCADE,
+        reference_source_key TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('law', 'precedent')),
+        query_text TEXT NOT NULL,
+        issue_type TEXT,
+        rank_order INTEGER NOT NULL,
+        match_reason TEXT NOT NULL,
+        confidence_score REAL NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.query(`
+      CREATE INDEX IF NOT EXISTS keyword_verification_hits_run_rank_idx
+      ON keyword_verification_hits (run_id, rank_order ASC)
     `);
   }
 
-  async function saveQueryRun(input: SaveRetrievalRunInput): Promise<RetrievalRunDetail> {
-    const runResult = await db.query<IdRow>(
-      `
-        INSERT INTO keyword_query_runs (
-          user_id,
-          query_text,
-          context_type,
-          provider_mode,
-          planner_json,
-          verification_json,
-          result_count,
-          top_score
-        )
-        VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)
-        RETURNING id
-      `,
-      [
-        input.userId,
-        input.plan.query,
-        input.plan.contextType,
-        input.plan.providerMode,
-        toJson(input.plan),
-        toJson(input.verification),
-        input.resultCount,
-        input.topScore
-      ]
-    );
-
-    const runId = runResult.rows[0]?.id;
-    if (!runId) {
-      throw new Error("Failed to create keyword query run.");
-    }
-
-    const hits: QueryHitRecord[] = [];
-    for (const hit of input.hits) {
-      const hitResult = await db.query<HitRow>(
+  async function saveRun(input: SaveKeywordVerificationRunInput): Promise<string> {
+    return db.withTransaction(async (tx) => {
+      const runResult = await tx.query<IdRow>(
         `
-          INSERT INTO keyword_query_hits (
-            run_id,
-            kind,
-            source_key,
-            score,
-            rank,
-            matched_terms,
-            reference_snapshot
+          INSERT INTO keyword_verification_runs (
+            user_id,
+            guest_id,
+            query_text,
+            normalized_query,
+            context_type,
+            provider_mode,
+            plan_json,
+            response_json
           )
-          VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)
-          RETURNING *
+          VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
+          RETURNING id
         `,
         [
-          runId,
-          hit.kind,
-          hit.sourceKey,
-          hit.score,
-          hit.rank,
-          toJson(hit.matchedTerms),
-          toJson(hit.referenceSnapshot)
+          input.actor.userId ?? null,
+          input.actor.guestId ?? null,
+          input.request.query,
+          input.plan.normalizedQuery,
+          input.request.contextType,
+          input.providerMode,
+          toJson(input.plan),
+          toJson({})
         ]
       );
 
-      const row = hitResult.rows[0];
-      if (!row) {
-        continue;
+      const runId = runResult.rows[0]?.id;
+      if (!runId) {
+        throw new Error("Failed to save keyword verification run.");
       }
 
-      hits.push({
-        id: row.id,
-        run_id: row.run_id,
-        kind: row.kind,
-        source_key: row.source_key,
-        score: row.score,
-        rank: row.rank,
-        matched_terms: parseArray(row.matched_terms),
-        reference_snapshot: row.reference_snapshot ?? {},
-        created_at: row.created_at
-      });
-    }
+      await tx.query(
+        `
+          UPDATE keyword_verification_runs
+          SET response_json = $2::jsonb
+          WHERE id = $1
+        `,
+        [
+          runId,
+          toJson({
+            run_id: runId,
+            ...input.response
+          })
+        ]
+      );
 
-    const run = {
-      id: runId,
-      query_text: input.plan.query,
-      context_type: input.plan.contextType,
-      provider_mode: input.plan.providerMode,
-      user_id: input.userId,
-      planner_json: input.plan as unknown as Record<string, unknown>,
-      verification_json: input.verification as unknown as Record<string, unknown>,
-      result_count: input.resultCount,
-      top_score: input.topScore,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
+      const topIssue = input.plan.candidateIssues[0]?.type ?? null;
+      const hits = [
+        ...input.response.matched_laws,
+        ...input.response.matched_precedents
+      ];
 
-    return {
-      run,
-      hits
-    };
-  }
+      for (const [index, hit] of hits.entries()) {
+        await tx.query(
+          `
+            INSERT INTO keyword_verification_hits (
+              run_id,
+              reference_source_key,
+              kind,
+              query_text,
+              issue_type,
+              rank_order,
+              match_reason,
+              confidence_score
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          `,
+          [
+            runId,
+            hit.reference.id,
+            hit.kind,
+            input.request.query,
+            topIssue,
+            index + 1,
+            hit.matchReason,
+            hit.confidenceScore
+          ]
+        );
+      }
 
-  async function getRun(runId: string): Promise<RetrievalRunDetail | null> {
-    const runResult = await db.query<RunRow>(
-      `
-        SELECT *
-        FROM keyword_query_runs
-        WHERE id = $1
-        LIMIT 1
-      `,
-      [runId]
-    );
-
-    const runRow = runResult.rows[0];
-    if (!runRow) {
-      return null;
-    }
-
-    const hitsResult = await db.query<HitRow>(
-      `
-        SELECT *
-        FROM keyword_query_hits
-        WHERE run_id = $1
-        ORDER BY rank ASC, created_at ASC
-      `,
-      [runId]
-    );
-
-    return {
-      run: {
-        id: runRow.id,
-        query_text: runRow.query_text,
-        context_type: runRow.context_type,
-        provider_mode: runRow.provider_mode,
-        user_id: runRow.user_id,
-        planner_json: runRow.planner_json,
-        verification_json: runRow.verification_json,
-        result_count: runRow.result_count,
-        top_score: runRow.top_score,
-        created_at: runRow.created_at,
-        updated_at: runRow.updated_at
-      },
-      hits: hitsResult.rows.map((row) => ({
-        id: row.id,
-        run_id: row.run_id,
-        kind: row.kind,
-        source_key: row.source_key,
-        score: row.score,
-        rank: row.rank,
-        matched_terms: parseArray(row.matched_terms),
-        reference_snapshot: row.reference_snapshot ?? {},
-        created_at: row.created_at
-      }))
-    };
+      return runId;
+    });
   }
 
   return {
     ensureSchema,
-    saveQueryRun,
-    getRun
+    saveRun
   };
 }

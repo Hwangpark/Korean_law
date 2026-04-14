@@ -144,7 +144,6 @@ async function runAnalysisBridge(
   request: Record<string, unknown>,
   options: { providerMode: string }
 ): Promise<Record<string, unknown>> {
-  // @ts-expect-error Legacy runtime pipeline is still implemented in .mjs.
   const module = await import("../orchestrator/run-analysis.mjs");
   return module.runAnalysis(request, options) as Promise<Record<string, unknown>>;
 }

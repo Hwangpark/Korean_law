@@ -417,6 +417,34 @@ export async function analyzeCase(
   });
 }
 
+export type KeywordVerifyPayload = {
+  keyword: string;
+  context_type: string;
+  guest_id?: string;
+};
+
+export async function verifyKeyword(
+  baseUrl: string,
+  token: string | null | undefined,
+  payload: KeywordVerifyPayload,
+) {
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers.authorization = `Bearer ${token}`;
+  }
+
+  return requestJson<AnalyzeCaseResponse>(`${normalizeBaseUrl(baseUrl)}/api/keywords/verify`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      query: payload.keyword,
+      context_type: payload.context_type,
+      ...(payload.guest_id ? { guest_id: payload.guest_id } : {}),
+      limit: 4,
+    }),
+  });
+}
+
 export async function fetchHistory(baseUrl: string, token: string) {
   const response = await requestJson<{ items?: AnalysisHistoryItem[] }>(
     `${normalizeBaseUrl(baseUrl)}/api/history`,

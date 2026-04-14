@@ -1,50 +1,52 @@
-export type RetrievalProviderMode = "mock" | "live";
-export type RetrievalKind = "law" | "precedent";
+import type { ReferenceLibraryItem } from "../analysis/references.js";
 
-export interface KeywordVerificationRequest {
-  query: string;
-  contextType: string;
-  providerMode: RetrievalProviderMode;
-  limit: number;
-  userId: number | null;
-}
+export type KeywordContextType = "community" | "game_chat" | "messenger" | "other";
+export type VerificationActor = {
+  userId?: number;
+  guestId?: string;
+};
 
-export interface PlannedIssue {
+export interface RetrievalIssueDefinition {
   type: string;
   severity: "low" | "medium" | "high";
-  criminal: boolean;
-  civil: boolean;
   chargeLabel: string;
-  matchedKeywords: string[];
-  lawSearchQueries: string[];
+  keywords: string[];
+  lawQueries: string[];
 }
 
-export interface KeywordVerificationPlan {
-  query: string;
+export interface CandidateIssue {
+  type: string;
+  severity: "low" | "medium" | "high";
+  matchedTerms: string[];
+  lawQueries: string[];
+  precedentQueries: string[];
+  reason: string;
+}
+
+export interface KeywordQueryPlan {
+  originalQuery: string;
   normalizedQuery: string;
-  contextType: string;
-  providerMode: RetrievalProviderMode;
-  limit: number;
+  contextType: KeywordContextType;
   tokens: string[];
-  matchedIssues: PlannedIssue[];
-  searchQueries: string[];
-  rationale: string;
+  candidateIssues: CandidateIssue[];
+  lawQueries: string[];
+  precedentQueries: string[];
+  warnings: string[];
 }
 
-export interface LawCandidate {
+export interface LawDocumentRecord {
   law_name: string;
   article_no: string;
   article_title: string;
   content: string;
   penalty: string;
-  is_complaint_required: boolean;
   url: string;
   topics: string[];
   queries: string[];
-  provider: RetrievalProviderMode;
+  is_complaint_required?: boolean;
 }
 
-export interface PrecedentCandidate {
+export interface PrecedentDocumentRecord {
   case_no: string;
   court: string;
   date: string;
@@ -52,76 +54,88 @@ export interface PrecedentCandidate {
   verdict: string;
   sentence: string;
   key_reasoning: string;
-  similarity_score: number;
   url: string;
   topics: string[];
-  provider: RetrievalProviderMode;
+  similarity_score?: number;
 }
 
-export interface ScoredLawCandidate extends LawCandidate {
-  score: number;
-  matchedTerms: string[];
-  relevance: "strong" | "moderate" | "weak";
+export interface KeywordVerificationRequest {
+  query: string;
+  contextType: KeywordContextType;
+  limit?: number;
 }
 
-export interface ScoredPrecedentCandidate extends PrecedentCandidate {
-  score: number;
-  matchedTerms: string[];
-  relevance: "strong" | "moderate" | "weak";
-}
-
-export interface KeywordVerificationOutput {
-  meta: {
-    provider_mode: RetrievalProviderMode;
-    generated_at: string;
-    query: string;
-    context_type: string;
-  };
-  planner: KeywordVerificationPlan;
-  verification: {
-    summary: string;
-    score: number;
-    matched_issue_types: string[];
-    focus: RetrievalKind[];
-    recommended_keywords: string[];
-  };
-  law_search: {
-    provider: RetrievalProviderMode;
-    laws: ScoredLawCandidate[];
-  };
-  precedent_search: {
-    provider: RetrievalProviderMode;
-    precedents: ScoredPrecedentCandidate[];
-  };
-}
-
-export interface QueryRunRecord {
+export interface VerifiedReferenceCard {
   id: string;
-  query_text: string;
-  context_type: string;
-  provider_mode: string;
-  user_id: number | null;
-  planner_json: Record<string, unknown>;
-  verification_json: Record<string, unknown>;
-  result_count: number;
-  top_score: number;
-  created_at: string;
-  updated_at: string;
+  kind: "law" | "precedent";
+  title: string;
+  subtitle: string;
+  summary: string;
+  confidenceScore: number;
+  matchReason: string;
+  reference: ReferenceLibraryItem;
 }
 
-export interface QueryHitRecord {
-  id: string;
+export interface KeywordVerificationResponse {
   run_id: string;
-  kind: RetrievalKind;
-  source_key: string;
-  score: number;
-  rank: number;
-  matched_terms: string[];
-  reference_snapshot: Record<string, unknown>;
-  created_at: string;
+  query: {
+    original: string;
+    normalized: string;
+    context_type: KeywordContextType;
+  };
+  plan: {
+    tokens: string[];
+    candidate_issues: CandidateIssue[];
+    law_queries: string[];
+    precedent_queries: string[];
+    warnings: string[];
+  };
+  verification: {
+    headline: string;
+    interpretation: string;
+    warnings: string[];
+    disclaimer: string;
+  };
+  matched_laws: VerifiedReferenceCard[];
+  matched_precedents: VerifiedReferenceCard[];
+  legal_analysis: {
+    can_sue: boolean;
+    risk_level: number;
+    summary: string;
+    charges: Array<{
+      charge: string;
+      basis: string;
+      elements_met: string[];
+      probability: "high" | "medium" | "low";
+      expected_penalty: string;
+      reference_library: ReferenceLibraryItem[];
+    }>;
+    recommended_actions: string[];
+    evidence_to_collect: string[];
+    precedent_cards: Array<{
+      case_no: string;
+      court: string;
+      verdict: string;
+      summary: string;
+      similarity_score: number;
+      reference_library: ReferenceLibraryItem[];
+    }>;
+    disclaimer: string;
+    reference_library: ReferenceLibraryItem[];
+    law_reference_library: ReferenceLibraryItem[];
+    precedent_reference_library: ReferenceLibraryItem[];
+  };
+  law_reference_library: ReferenceLibraryItem[];
+  precedent_reference_library: ReferenceLibraryItem[];
+  reference_library: {
+    items: ReferenceLibraryItem[];
+  };
 }
 
-export interface RetrievalRunDetail {
-  run: QueryRunRecord;
-  hits: QueryHitRecord[];
+export interface SaveKeywordVerificationRunInput {
+  actor: VerificationActor;
+  providerMode: string;
+  request: KeywordVerificationRequest;
+  plan: KeywordQueryPlan;
+  response: Omit<KeywordVerificationResponse, "run_id">;
 }

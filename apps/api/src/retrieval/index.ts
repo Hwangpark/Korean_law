@@ -1,11 +1,11 @@
-export { createRetrievalHandler } from "./http.js";
-export { planKeywordVerification } from "./planner.js";
-export { createRetrievalStore } from "./store.js";
+export { createKeywordVerificationHandler } from "./http.js";
+export { createKeywordVerificationService } from "./service.js";
+export { createKeywordVerificationStore } from "./store.js";
+export { createKeywordVerificationHandler as createRetrievalHandler } from "./http.js";
+export { createKeywordVerificationService as createRetrievalService } from "./service.js";
+export { createKeywordVerificationStore as createRetrievalStore } from "./store.js";
 export type {
-  KeywordVerificationOutput,
-  KeywordVerificationPlan,
   KeywordVerificationRequest,
-  RetrievalProviderMode,
-  RetrievalRunDetail
+  KeywordVerificationResponse,
+  VerifiedReferenceCard
 } from "./types.js";
-

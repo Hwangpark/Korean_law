@@ -7,6 +7,7 @@ export interface PostgresClient {
     rows: T[];
     rowCount: number | null;
   }>;
+  withTransaction<T>(fn: (client: PostgresClient) => Promise<T>): Promise<T>;
   close(): Promise<void>;
 }
 
@@ -26,6 +27,36 @@ export function createPostgresClient(config: DatabaseConfig): PostgresClient {
         rows: result.rows as T[],
         rowCount: result.rowCount
       };
+    },
+    async withTransaction<T>(fn: (client: PostgresClient) => Promise<T>) {
+      const client = await pool.connect();
+      const transactionalClient: PostgresClient = {
+        async query<U = Record<string, unknown>>(text: string, params: unknown[] = []) {
+          const result = await client.query(text, params);
+          return {
+            rows: result.rows as U[],
+            rowCount: result.rowCount
+          };
+        },
+        async withTransaction<U>(innerFn: (nestedClient: PostgresClient) => Promise<U>) {
+          return innerFn(transactionalClient);
+        },
+        async close() {
+          // no-op inside a transaction-scoped client wrapper
+        }
+      };
+
+      try {
+        await client.query("BEGIN");
+        const result = await fn(transactionalClient);
+        await client.query("COMMIT");
+        return result;
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
     },
     async close() {
       await pool.end();
