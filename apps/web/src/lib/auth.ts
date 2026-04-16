@@ -155,6 +155,19 @@ export type AnalyzeCaseResponse = {
   [key: string]: unknown;
 };
 
+export type AnalyzeJobStartResponse = {
+  job_id: string;
+  stream_url?: string;
+  result_url?: string;
+  guest_id?: string;
+  guest_remaining?: number;
+  meta?: {
+    guest_id?: string;
+    guest_remaining?: number;
+  };
+  [key: string]: unknown;
+};
+
 export type GuestSession = {
   guestId: string;
   guestRemaining: number;
@@ -193,7 +206,7 @@ export const PASSWORD_POLICY_HINT =
 const AUTH_BASE_URL_STORAGE_KEY = 'korean-law.auth.base-url';
 const AUTH_TOKEN_STORAGE_KEY = 'korean-law.auth.token';
 const GUEST_SESSION_STORAGE_KEY = 'korean-law.guest.session';
-const DEFAULT_GUEST_LIMIT = 3;
+const DEFAULT_GUEST_LIMIT = 10;
 const LETTER_PATTERN = /[A-Za-z]/;
 const NUMBER_PATTERN = /\d/;
 const SPECIAL_PATTERN = /[!-/:-@[-`{-~]/;
@@ -548,10 +561,16 @@ export async function analyzeCase(
     headers.authorization = `Bearer ${token}`;
   }
 
-  return requestJson<AnalyzeCaseResponse>(`${normalizeBaseUrl(baseUrl)}/api/analyze`, {
+  return requestJson<AnalyzeJobStartResponse>(`${normalizeBaseUrl(baseUrl)}/api/analyze`, {
     method: 'POST',
     headers,
     body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchAnalysisResult(baseUrl: string, jobId: string) {
+  return requestJson<AnalyzeCaseResponse>(`${normalizeBaseUrl(baseUrl)}/api/analyze/${encodeURIComponent(jobId)}`, {
+    method: 'GET',
   });
 }
 

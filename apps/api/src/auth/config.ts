@@ -34,6 +34,7 @@ export interface EmailConfig {
 export interface AuthConfig {
   port: number;
   corsOrigins: string[];
+  trustedProxyAddresses: string[];
   database: DatabaseConfig;
   jwt: JwtConfig;
   email: EmailConfig;
@@ -102,10 +103,20 @@ export function loadAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig
 
   const corsOriginEnv = env.AUTH_CORS_ORIGIN || (nodeEnv === "development" ? "http://localhost:5173" : "*");
   const corsOrigins = corsOriginEnv.split(",").map((s) => s.trim()).filter(Boolean);
+  const trustedProxyAddresses = (
+    env.AUTH_TRUST_PROXY_IPS ||
+    env.API_TRUST_PROXY_IPS ||
+    env.TRUST_PROXY_IPS ||
+    ""
+  )
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
 
   return {
     port,
     corsOrigins,
+    trustedProxyAddresses,
     jwt: {
       secret: requireInProduction(
         env.AUTH_JWT_SECRET,

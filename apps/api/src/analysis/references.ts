@@ -1,3 +1,9 @@
+import {
+  buildLawReferenceKey,
+  buildPrecedentReferenceKey,
+  buildReferenceHref
+} from "./reference-keys.mjs";
+
 export type ReferenceKind = "law" | "precedent";
 
 export interface ReferenceSeed {
@@ -46,6 +52,13 @@ export interface ReferenceLibraryItem {
 export interface ReferenceDetailItem extends ReferenceLibraryItem {
   payload: Record<string, unknown>;
   searchText: string;
+}
+
+export interface MaterializeReferenceSeedOptions {
+  caseId?: string | null;
+  runId?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ReferenceRow {
@@ -133,7 +146,7 @@ function buildLawSeed(law: Record<string, unknown>, sourceMode: string): Referen
 
   return {
     kind: "law",
-    sourceKey: `law:${normalizedLawName}:${normalizedArticleNo}`,
+    sourceKey: buildLawReferenceKey(normalizedLawName, normalizedArticleNo),
     sourceMode,
     title: `${normalizedLawName} ${normalizedArticleNo}`.trim(),
     subtitle: articleTitle || "법령 조문",
@@ -181,7 +194,7 @@ function buildPrecedentSeed(precedent: Record<string, unknown>, sourceMode: stri
 
   return {
     kind: "precedent",
-    sourceKey: `precedent:${normalizedCaseNo}`,
+    sourceKey: buildPrecedentReferenceKey(normalizedCaseNo),
     sourceMode,
     title: [normalizedCaseNo, normalizedCourt].filter(Boolean).join(" "),
     subtitle: [verdict, date].filter(Boolean).join(" · ") || "판례",
@@ -226,11 +239,42 @@ export function buildReferenceSeeds(result: Record<string, unknown>, sourceMode:
   ];
 }
 
+export function materializeReferenceSeed(
+  seed: ReferenceSeed,
+  options: MaterializeReferenceSeedOptions = {}
+): ReferenceLibraryItem {
+  const createdAt = options.createdAt ?? new Date(0).toISOString();
+  const updatedAt = options.updatedAt ?? createdAt;
+
+  return {
+    id: seed.sourceKey,
+    kind: seed.kind,
+    href: buildReferenceHref(seed.kind, seed.sourceKey),
+    title: seed.title,
+    subtitle: seed.subtitle,
+    summary: seed.summary,
+    details: seed.details,
+    url: seed.url,
+    articleNo: seed.articleNo,
+    caseNo: seed.caseNo,
+    court: seed.court,
+    verdict: seed.verdict,
+    penalty: seed.penalty,
+    similarityScore: seed.similarityScore,
+    sourceMode: seed.sourceMode,
+    keywords: seed.keywords,
+    caseId: options.caseId ?? null,
+    runId: options.runId ?? null,
+    createdAt,
+    updatedAt
+  };
+}
+
 export function mapReferenceRow(row: ReferenceRow): ReferenceLibraryItem {
   return {
     id: row.source_key,
     kind: row.kind,
-    href: `/api/references/${row.kind}/${encodeURIComponent(row.source_key)}`,
+    href: buildReferenceHref(row.kind, row.source_key),
     title: row.title,
     subtitle: row.subtitle ?? "",
     summary: row.summary,

@@ -1,4 +1,5 @@
 import type { PostgresClient } from "../auth/postgres.js";
+import { buildStoredKeywordVerificationResponse } from "./privacy.js";
 import type { SaveKeywordVerificationRunInput } from "./types.js";
 
 interface IdRow {
@@ -107,10 +108,16 @@ export function createKeywordVerificationStore(db: PostgresClient): KeywordVerif
         `,
         [
           runId,
-          toJson({
-            run_id: runId,
-            ...input.response
-          })
+          toJson(
+            buildStoredKeywordVerificationResponse({
+              ...input.response,
+              run_id: runId,
+              retrieval_evidence_pack: {
+                ...input.response.retrieval_evidence_pack,
+                run_id: runId
+              }
+            })
+          )
         ]
       );
 

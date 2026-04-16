@@ -1,0 +1,9 @@
+{
+  "request_id": "sample-mixed-defamation-privacy",
+  "input_type": "text",
+  "context_type": "messenger",
+  "text": "카카오톡 단톡방 게시판에 제 실명과 전화번호를 공개하고 제가 회사 돈을 떼먹은 사기꾼이라고 허위사실을 퍼뜨렸습니다.",
+  "metadata": {
+    "locale": "ko-KR"
+  }
+}

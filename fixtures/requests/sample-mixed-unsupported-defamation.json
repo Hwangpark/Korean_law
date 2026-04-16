@@ -1,0 +1,9 @@
+{
+  "request_id": "sample-mixed-unsupported-defamation",
+  "input_type": "text",
+  "context_type": "community",
+  "text": "불법촬영 사진을 유포하고 커뮤니티에 제 실명까지 적어가며 허위사실을 올렸습니다.",
+  "metadata": {
+    "locale": "ko-KR"
+  }
+}

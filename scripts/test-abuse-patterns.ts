@@ -8,6 +8,9 @@ const positiveCases = [
   { text: "니.애미", keyword: "패드립" },
   { text: "느금마", keyword: "패드립" },
   { text: "니엄마", keyword: "패드립" },
+  { text: "너거매", keyword: "패드립" },
+  { text: "너검마", keyword: "패드립" },
+  { text: "너거 엄마", keyword: "패드립" },
   { text: "븅신", keyword: "병신" },
   { text: "개새끼", keyword: "개새" }
 ];
@@ -15,7 +18,8 @@ const positiveCases = [
 const negativeCases = [
   { text: "엄마가 오신다", keyword: "패드립" },
   { text: "애미야 밥먹자", keyword: "패드립" },
-  { text: "내 엄마는 집에 계신다", keyword: "패드립" }
+  { text: "내 엄마는 집에 계신다", keyword: "패드립" },
+  { text: "너 거 매일 온다며", keyword: "패드립" }
 ];
 
 for (const testCase of positiveCases) {

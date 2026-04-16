@@ -23,6 +23,8 @@ export interface RetrievalIssueDefinition {
   chargeLabel: string;
   keywords: string[];
   lawQueries: string[];
+  precedentQueries: string[];
+  preciseTerms: string[];
 }
 
 export interface CandidateIssue {
@@ -32,6 +34,90 @@ export interface CandidateIssue {
   lawQueries: string[];
   precedentQueries: string[];
   reason: string;
+  signalScore?: number;
+  hypothesisConfidence?: number;
+  hypothesisReason?: string;
+  legalElementSignals?: string[];
+  factHints?: string[];
+  querySources?: Array<"keyword" | "fact" | "llm" | "hypothesis" | "query_hint" | "legal_element" | "profile" | "scope_warning">;
+  broadLawQueries?: string[];
+  preciseLawQueries?: string[];
+  broadPrecedentQueries?: string[];
+  precisePrecedentQueries?: string[];
+}
+
+export interface ScopeFlags {
+  proceduralHeavy: boolean;
+  insufficientFacts: boolean;
+  unsupportedIssuePresent: boolean;
+}
+
+export interface ScopeFilterResult {
+  supportedIssues: string[];
+  unsupportedIssues: string[];
+  scopeWarnings: string[];
+  scopeFlags: ScopeFlags;
+}
+
+export type EvidenceQueryBucket = "broad" | "precise";
+export type QuerySourceKind = "keyword" | "fact" | "llm" | "hypothesis" | "query_hint" | "legal_element" | "profile" | "scope_warning";
+
+export interface EvidenceQueryRef {
+  text: string;
+  bucket: EvidenceQueryBucket;
+  channel: "law" | "precedent";
+  sources?: QuerySourceKind[];
+  issue_types?: string[];
+  legal_element_signals?: string[];
+}
+
+export interface QueryProvenanceRef extends EvidenceQueryRef {}
+
+export interface EvidenceSnippet {
+  field: "content" | "article_title" | "summary" | "key_reasoning" | "sentence" | "penalty";
+  text: string;
+}
+
+export interface EvidenceCitation {
+  citation_id: string;
+  reference_id: string;
+  reference_key: string;
+  kind: "law" | "precedent";
+  statement_type: "charge" | "precedent_card" | "grounding_evidence";
+  statement_path: string;
+  title: string;
+  confidence_score: number;
+  match_reason: string;
+  matched_issue_types: string[];
+  query_refs: EvidenceQueryRef[];
+  query_source_tags: string[];
+  snippet: EvidenceSnippet | null;
+}
+
+export interface EvidenceCitationMap {
+  version: "v2";
+  citations: EvidenceCitation[];
+  by_reference_id: Record<string, string[]>;
+  by_statement_path: Record<string, string[]>;
+}
+
+export interface RetrievalEvidenceSeed {
+  reference_key: string;
+  kind: "law" | "precedent";
+  provider: string;
+  matched_queries: EvidenceQueryRef[];
+  matched_issue_types: string[];
+  snippet?: EvidenceSnippet | null;
+}
+
+export type RetrievalProviderSource = "fixture" | "live" | "live_fallback";
+
+export interface RetrievalAdapterProviderInfo {
+  requested_mode: string;
+  provider: string;
+  source: RetrievalProviderSource;
+  live_enabled: boolean;
+  fallback_reason?: string;
 }
 
 export interface KeywordQueryPlan {
@@ -40,9 +126,19 @@ export interface KeywordQueryPlan {
   contextType: KeywordContextType;
   tokens: string[];
   candidateIssues: CandidateIssue[];
+  broadLawQueries: string[];
+  preciseLawQueries: string[];
+  broadPrecedentQueries: string[];
+  precisePrecedentQueries: string[];
   lawQueries: string[];
   precedentQueries: string[];
+  lawQueryRefs?: QueryProvenanceRef[];
+  precedentQueryRefs?: QueryProvenanceRef[];
   warnings: string[];
+  supportedIssues: string[];
+  unsupportedIssues: string[];
+  scopeWarnings: string[];
+  scopeFlags: ScopeFlags;
 }
 
 export interface LawDocumentRecord {
@@ -55,6 +151,7 @@ export interface LawDocumentRecord {
   topics: string[];
   queries: string[];
   is_complaint_required?: boolean;
+  retrieval_evidence?: RetrievalEvidenceSeed;
 }
 
 export interface PrecedentDocumentRecord {
@@ -68,6 +165,7 @@ export interface PrecedentDocumentRecord {
   url: string;
   topics: string[];
   similarity_score?: number;
+  retrieval_evidence?: RetrievalEvidenceSeed;
 }
 
 export interface KeywordVerificationRequest {
@@ -107,17 +205,78 @@ export interface RetrievalTraceEvent {
   input_ref: string;
   output_ref: string[];
   reason: string;
+  query_refs?: QueryProvenanceRef[];
 }
 
 export interface VerifiedReferenceCard {
   id: string;
+  referenceKey: string;
   kind: "law" | "precedent";
   title: string;
   subtitle: string;
   summary: string;
   confidenceScore: number;
   matchReason: string;
+  querySourceTags?: string[];
+  matchedQueries: EvidenceQueryRef[];
+  matchedIssueTypes: string[];
+  snippet?: EvidenceSnippet | null;
+  source: {
+    law_name?: string;
+    article_no?: string;
+    article_title?: string;
+    penalty?: string;
+    url?: string;
+    case_no?: string;
+    court?: string;
+    verdict?: string;
+    sentence?: string;
+  };
   reference: ReferenceLibraryItem;
+}
+
+export interface RetrievalEvidencePack {
+  version: "v2";
+  run_id?: string;
+  query: {
+    original: string;
+    normalized: string;
+    context_type: KeywordContextType;
+  };
+  plan: {
+    tokens: string[];
+    candidate_issues: CandidateIssue[];
+    broad_law_queries: string[];
+    precise_law_queries: string[];
+    broad_precedent_queries: string[];
+    precise_precedent_queries: string[];
+    law_queries: string[];
+    precedent_queries: string[];
+    warnings: string[];
+    supported_issues: string[];
+    unsupported_issues: string[];
+    scope_warnings: string[];
+    scope_flags: ScopeFlags;
+    scope_filter?: {
+      supported_issues: string[];
+      unsupported_issues: string[];
+      scope_warnings: string[];
+    };
+  };
+  retrieval_preview: {
+    law: RetrievalPreview | null;
+    precedent: RetrievalPreview | null;
+  };
+  retrieval_trace: RetrievalTraceEvent[];
+  matched_laws: VerifiedReferenceCard[];
+  matched_precedents: VerifiedReferenceCard[];
+  reference_library?: {
+    items: ReferenceLibraryItem[];
+  };
+  selected_reference_ids: string[];
+  top_issue_types: string[];
+  evidence_strength: "high" | "medium" | "low";
+  citation_map: EvidenceCitationMap;
 }
 
 export interface KeywordVerificationResponse {
@@ -131,9 +290,22 @@ export interface KeywordVerificationResponse {
   plan: {
     tokens: string[];
     candidate_issues: CandidateIssue[];
+    broad_law_queries: string[];
+    precise_law_queries: string[];
+    broad_precedent_queries: string[];
+    precise_precedent_queries: string[];
     law_queries: string[];
     precedent_queries: string[];
     warnings: string[];
+    supported_issues: string[];
+    unsupported_issues: string[];
+    scope_warnings: string[];
+    scope_flags: ScopeFlags;
+    scope_filter?: {
+      supported_issues: string[];
+      unsupported_issues: string[];
+      scope_warnings: string[];
+    };
   };
   verification: {
     headline: string;
@@ -146,12 +318,70 @@ export interface KeywordVerificationResponse {
     precedent: RetrievalPreview | null;
   };
   retrieval_trace?: RetrievalTraceEvent[];
+  retrieval_evidence_pack: RetrievalEvidencePack;
   matched_laws: VerifiedReferenceCard[];
   matched_precedents: VerifiedReferenceCard[];
   legal_analysis: {
     can_sue: boolean;
     risk_level: number;
     summary: string;
+    scope_assessment?: {
+      supported_issues: string[];
+      unsupported_issues: string[];
+      procedural_heavy: boolean;
+      insufficient_facts: boolean;
+      unsupported_issue_present: boolean;
+      warnings: string[];
+    };
+    grounding_evidence?: {
+      top_issue: string | null;
+      evidence_strength: "high" | "medium" | "low";
+      laws: Array<{
+        reference_key: string;
+        law_name: string;
+        article_no: string;
+        article_title: string;
+        penalty: string;
+        url: string;
+        confidence_score: number;
+        match_reason: string;
+        matched_issue_types: string[];
+        matched_queries: string[];
+        query_refs?: EvidenceQueryRef[];
+        citation_id?: string;
+        reference_id?: string;
+        source_field?: string;
+        snippet: string;
+      }>;
+      precedents: Array<{
+        reference_key: string;
+        case_no: string;
+        court: string;
+        verdict: string;
+        sentence: string;
+        url: string;
+        confidence_score: number;
+        match_reason: string;
+        matched_issue_types: string[];
+        matched_queries: string[];
+        query_refs?: EvidenceQueryRef[];
+        citation_id?: string;
+        reference_id?: string;
+        source_field?: string;
+        snippet: string;
+      }>;
+    };
+    decision_axis?: {
+      blocked_by_scope: boolean;
+      scope_block_reasons?: string[];
+      evidence_strength: "high" | "medium" | "low";
+      actionable_charge_count: number;
+      fact_signal_count: number;
+      supported_issue_count?: number;
+      base_risk_level?: number;
+      fact_risk_boost?: number;
+    };
+    selected_reference_ids?: string[];
     charges: Array<{
       charge: string;
       basis: string;
@@ -159,6 +389,16 @@ export interface KeywordVerificationResponse {
       probability: "high" | "medium" | "low";
       expected_penalty: string;
       reference_library: ReferenceLibraryItem[];
+      grounding?: {
+        citation_id?: string;
+        law_reference_id?: string;
+        precedent_reference_ids?: string[];
+        reference_key?: string;
+        query_refs?: EvidenceQueryRef[];
+        match_reason?: string;
+        snippet?: EvidenceSnippet | null;
+        evidence_count?: number;
+      };
     }>;
     recommended_actions: string[];
     evidence_to_collect: string[];
@@ -169,6 +409,15 @@ export interface KeywordVerificationResponse {
       summary: string;
       similarity_score: number;
       reference_library: ReferenceLibraryItem[];
+      grounding?: {
+        citation_id?: string;
+        reference_id?: string;
+        reference_key?: string;
+        query_refs?: EvidenceQueryRef[];
+        match_reason?: string;
+        snippet?: EvidenceSnippet | null;
+        evidence_count?: number;
+      };
     }>;
     disclaimer: string;
     reference_library: ReferenceLibraryItem[];

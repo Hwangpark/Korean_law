@@ -1,0 +1,479 @@
+import assert from "node:assert/strict";
+import http from "node:http";
+
+import { buildReferenceSeeds } from "../apps/api/src/analysis/references.js";
+import type { AnalysisConfig } from "../apps/api/src/analysis/config.js";
+import type { AnalysisStore, GuestUsageIdentity, GuestUsageResult } from "../apps/api/src/analysis/store.js";
+import type { AuthConfig } from "../apps/api/src/auth/config.js";
+import type { AuthService } from "../apps/api/src/auth/service.js";
+import { createKeywordVerificationHandler } from "../apps/api/src/retrieval/http.js";
+import { buildPublicKeywordVerificationResponse, buildStoredKeywordVerificationResponse } from "../apps/api/src/retrieval/privacy.js";
+import { createKeywordVerificationService } from "../apps/api/src/retrieval/service.js";
+import type { KeywordVerificationResponse } from "../apps/api/src/retrieval/types.js";
+import type { KeywordVerificationStore } from "../apps/api/src/retrieval/store.js";
+
+function createAuthConfig(): AuthConfig {
+  return {
+    port: 0,
+    corsOrigins: ["http://localhost:5173"],
+    trustedProxyAddresses: [],
+    database: {
+      host: "127.0.0.1",
+      port: 5432,
+      database: "koreanlaw",
+      user: "tester",
+      password: "tester"
+    },
+    jwt: {
+      secret: "test-secret",
+      issuer: "test-issuer",
+      audience: "test-audience",
+      expiresInSeconds: 3600
+    },
+    email: {
+      user: "tester@example.com",
+      appPassword: "",
+      enabled: false,
+      baseUrl: "http://localhost:3001"
+    },
+    nodeEnv: "test",
+    requestBodyLimit: 1_000_000,
+    requestIdPrefix: "test"
+  };
+}
+
+function createAnalysisConfig(): AnalysisConfig {
+  return {
+    providerMode: "mock",
+    requestBodyLimit: 1_000_000,
+    crawlTimeoutMs: 1_000,
+    crawlMaxBytes: 100_000,
+    crawlFollowRedirects: 0
+  };
+}
+
+function createMockAuthService(): AuthService {
+  return {
+    ensureSchema: async () => undefined,
+    requestEmailCode: async () => ({ status: 200, body: {} }),
+    verifyEmailCode: async () => ({ status: 200, body: {} }),
+    signup: async () => ({ status: 200, body: {} }),
+    login: async () => ({ status: 200, body: {} }),
+    getUserProfile: async () => null,
+    verifyToken: async () => ({
+      sub: "1",
+      email: "tester@example.com",
+      iat: 0,
+      exp: 0,
+      iss: "test-issuer",
+      aud: "test-audience",
+      type: "access"
+    }),
+    close: async () => undefined
+  };
+}
+
+function createKeywordStoreStub(): KeywordVerificationStore {
+  return {
+    async ensureSchema() {
+      return;
+    },
+    async saveRun() {
+      return "keyword-http-run";
+    }
+  };
+}
+
+function createAnalysisStoreStub(): AnalysisStore {
+  return {
+    ensureSchema: async () => undefined,
+    saveAnalysis: async () => ({
+      caseId: "case-test",
+      runId: "run-test",
+      referenceLibrary: []
+    }),
+    saveReferenceLibrary: async (input) =>
+      buildReferenceSeeds(input.result as Record<string, unknown>, input.providerMode).map((seed) => ({
+        id: seed.sourceKey,
+        kind: seed.kind,
+        href: `/api/references/${seed.kind}/${encodeURIComponent(seed.sourceKey)}`,
+        title: seed.title,
+        subtitle: seed.subtitle,
+        summary: seed.summary,
+        details: seed.details,
+        url: seed.url,
+        articleNo: seed.articleNo,
+        caseNo: seed.caseNo,
+        court: seed.court,
+        verdict: seed.verdict,
+        penalty: seed.penalty,
+        similarityScore: seed.similarityScore,
+        sourceMode: seed.sourceMode,
+        keywords: seed.keywords,
+        caseId: null,
+        runId: null,
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString()
+      })),
+    listHistory: async () => [],
+    consumeGuestAnalysis: async (_identity: GuestUsageIdentity): Promise<GuestUsageResult> => ({
+      guestId: "guest-test",
+      usageCount: 1,
+      limit: 10,
+      remaining: 9,
+      allowed: true
+    }),
+    searchReferences: async () => [],
+    getReferenceByKindAndId: async () => null
+  };
+}
+
+function createQuotaAnalysisStoreStub(limit = 2): AnalysisStore & { seenIps: string[] } {
+  const base = createAnalysisStoreStub();
+  const counts = new Map<string, number>();
+  const seenIps: string[] = [];
+
+  return {
+    ...base,
+    seenIps,
+    async consumeGuestAnalysis(identity: GuestUsageIdentity): Promise<GuestUsageResult> {
+      seenIps.push(identity.ipAddress);
+      const usageCount = (counts.get(identity.ipAddress) ?? 0) + 1;
+      counts.set(identity.ipAddress, usageCount);
+
+      return {
+        guestId: String(identity.guestId ?? "").trim() || null,
+        usageCount,
+        limit,
+        remaining: Math.max(limit - usageCount, 0),
+        allowed: usageCount <= limit
+      };
+    }
+  };
+}
+
+async function withServer(
+  handler: (req: http.IncomingMessage, res: http.ServerResponse) => Promise<boolean>,
+  run: (baseUrl: string) => Promise<void>
+): Promise<void> {
+  const server = http.createServer((req, res) => {
+    void handler(req, res)
+      .then((handled) => {
+        if (handled || res.writableEnded) {
+          return;
+        }
+        res.statusCode = 404;
+        res.end(JSON.stringify({ error: "Not found." }));
+      })
+      .catch((error: unknown) => {
+        if (res.writableEnded) {
+          return;
+        }
+        res.statusCode = 500;
+        res.setHeader("content-type", "application/json; charset=utf-8");
+        res.end(JSON.stringify({
+          error: error instanceof Error ? error.message : "Unexpected error."
+        }));
+      });
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Failed to bind keyword boundary server.");
+  }
+
+  try {
+    await run(`http://127.0.0.1:${address.port}`);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+}
+
+async function postJson(url: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+
+  assert.equal(response.status, 200, "keyword verify request should succeed");
+  return response.json() as Promise<Record<string, unknown>>;
+}
+
+async function postJsonSnapshot(
+  url: string,
+  body: Record<string, unknown>,
+  headers: Record<string, string> = {}
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...headers
+    },
+    body: JSON.stringify(body)
+  });
+
+  return {
+    status: response.status,
+    body: await response.json() as Record<string, unknown>
+  };
+}
+
+function assertStoredBoundary(stored: Record<string, unknown>, internal: KeywordVerificationResponse): void {
+  assert.deepEqual(
+    stored,
+    buildStoredKeywordVerificationResponse(internal),
+    "stored keyword response should exactly match the storage privacy projection"
+  );
+
+  assert.equal("matched_laws" in stored, false, "stored response must not keep matched_laws cards");
+  assert.equal("matched_precedents" in stored, false, "stored response must not keep matched_precedents cards");
+  assert.equal("reference_library" in stored, false, "stored response must not keep top-level reference library");
+  assert.equal("law_reference_library" in stored, false, "stored response must not keep top-level law reference library");
+  assert.equal("precedent_reference_library" in stored, false, "stored response must not keep top-level precedent reference library");
+
+  const pack = stored.retrieval_evidence_pack as Record<string, unknown>;
+  assert.ok(pack, "stored response should keep a trimmed retrieval_evidence_pack");
+  assert.deepEqual(
+    Object.keys(pack).sort(),
+    ["evidence_strength", "query", "run_id", "selected_reference_ids", "top_issue_types", "version"].sort(),
+    "stored retrieval_evidence_pack should keep only the minimal stable fields"
+  );
+}
+
+function assertPublicBoundary(publicBody: Record<string, unknown>, internal: KeywordVerificationResponse): void {
+  const { guest_id, guest_remaining, ...publicProjection } = publicBody;
+
+  assert.deepEqual(
+    publicProjection,
+    buildPublicKeywordVerificationResponse(internal),
+    "public keyword response should exactly match the public privacy projection"
+  );
+
+  assert.equal(typeof guest_id, "string", "public keyword response should keep guest_id envelope metadata");
+  assert.equal(typeof guest_remaining, "number", "public keyword response should keep guest_remaining envelope metadata");
+
+  assert.equal("retrieval_evidence_pack" in publicBody, false, "public keyword response must not expose retrieval_evidence_pack");
+  assert.equal("retrieval_trace" in publicBody, false, "public keyword response must not expose retrieval_trace");
+  assert.ok(publicBody.retrieval_preview, "public keyword response should expose retrieval_preview");
+  assert.equal("reference_library" in publicBody, false, "public keyword response must not expose internal reference_library");
+  assert.equal("law_reference_library" in publicBody, false, "public keyword response must not expose law reference snapshots");
+  assert.equal("precedent_reference_library" in publicBody, false, "public keyword response must not expose precedent reference snapshots");
+
+  const plan = publicBody.plan as Record<string, unknown>;
+  assert.deepEqual(
+    Object.keys(plan).sort(),
+    ["candidate_issues", "scope_flags", "scope_filter", "warnings", "supported_issues", "unsupported_issues", "scope_warnings"].sort(),
+    "public plan should expose only the reduced safe plan payload"
+  );
+  assert.deepEqual(
+    plan.scope_filter,
+    {
+      supported_issues: internal.plan.supported_issues,
+      unsupported_issues: internal.plan.unsupported_issues,
+      scope_warnings: internal.plan.scope_warnings
+    },
+    "public plan should expose canonical scope_filter snapshot"
+  );
+
+  const matchedLaw = Array.isArray(publicBody.matched_laws)
+    ? publicBody.matched_laws[0] as Record<string, unknown>
+    : null;
+  assert.ok(matchedLaw, "public keyword response should keep matched law cards");
+  assert.equal("reference" in matchedLaw, false, "matched law card must not embed ReferenceLibraryItem");
+
+  const legalAnalysis = publicBody.legal_analysis as Record<string, unknown>;
+  assert.ok(legalAnalysis, "public keyword response should keep legal_analysis");
+  assert.equal("reference_library" in legalAnalysis, false, "public legal_analysis must not expose duplicated reference library");
+  assert.equal("law_reference_library" in legalAnalysis, false, "public legal_analysis must not expose law reference snapshots");
+  assert.equal("precedent_reference_library" in legalAnalysis, false, "public legal_analysis must not expose precedent reference snapshots");
+  assert.deepEqual(
+    legalAnalysis.grounding_evidence,
+    {
+      top_issue: internal.legal_analysis.grounding_evidence?.top_issue ?? "",
+      evidence_strength: internal.legal_analysis.grounding_evidence?.evidence_strength ?? "low"
+    },
+    "public keyword legal_analysis should keep only coarse grounding evidence summary"
+  );
+}
+
+async function assertRetrievalToolsShareGuestQuotaBoundary(): Promise<void> {
+  const authConfig = createAuthConfig();
+  const analysisConfig = createAnalysisConfig();
+  const authService = createMockAuthService();
+  const analysisStore = createQuotaAnalysisStoreStub(2);
+  const keywordService = createKeywordVerificationService({
+    providerMode: "mock",
+    analysisStore,
+    keywordStore: createKeywordStoreStub()
+  });
+  const handler = createKeywordVerificationHandler(
+    authService,
+    authConfig,
+    analysisConfig,
+    analysisStore,
+    keywordService
+  );
+
+  await withServer(handler, async (baseUrl) => {
+    const invalid = await postJsonSnapshot(
+      `${baseUrl}/api/tools/search_law_tool`,
+      {
+        context_type: "community",
+        guest_id: "guest-tool"
+      },
+      { "x-forwarded-for": "203.0.113.10" }
+    );
+    assert.equal(invalid.status, 422, "invalid retrieval tool input should fail before quota consumption");
+
+    const first = await postJsonSnapshot(
+      `${baseUrl}/api/tools/search_law_tool`,
+      {
+        query: "명예훼손 허위사실",
+        context_type: "community",
+        guest_id: "guest-tool"
+      },
+      { "x-forwarded-for": "203.0.113.11" }
+    );
+    assert.equal(first.status, 200, "first guest retrieval tool request should succeed");
+    assert.equal(first.body.guest_id, "guest-tool", "tool success envelope should expose guest_id");
+    assert.equal(first.body.guest_remaining, 1, "tool success envelope should expose remaining guest quota");
+
+    const second = await postJsonSnapshot(
+      `${baseUrl}/api/tools/search_precedent_tool`,
+      {
+        query: "명예훼손 단체대화방",
+        context_type: "community",
+        guest_id: "guest-tool"
+      },
+      { "x-forwarded-for": "203.0.113.12" }
+    );
+    assert.equal(second.status, 200, "forged x-forwarded-for should not reset tool quota");
+    assert.equal(second.body.guest_remaining, 0, "second tool request should exhaust guest quota");
+
+    const third = await postJsonSnapshot(
+      `${baseUrl}/api/tools/search_law_tool`,
+      {
+        query: "모욕",
+        context_type: "community",
+        guest_id: "guest-tool"
+      },
+      { "x-forwarded-for": "203.0.113.13" }
+    );
+    assert.equal(third.status, 429, "third retrieval tool request should hit guest quota");
+    assert.equal(third.body.guest_remaining, 0, "tool 429 envelope should match keyword guest limit envelope");
+    assert.deepEqual(
+      third.body.guest_usage,
+      {
+        guest_id: "guest-tool",
+        used: 3,
+        limit: 2,
+        remaining: 0
+      },
+      "tool 429 response should include guest usage details"
+    );
+  });
+
+  assert.deepEqual(
+    analysisStore.seenIps,
+    ["127.0.0.1", "127.0.0.1", "127.0.0.1"],
+    "retrieval tool quota should use socket IP unless a trusted proxy is configured"
+  );
+}
+
+async function assertAuthenticatedRetrievalToolsDoNotUseGuestQuota(): Promise<void> {
+  const authConfig = createAuthConfig();
+  const analysisConfig = createAnalysisConfig();
+  const authService = createMockAuthService();
+  const analysisStore = createQuotaAnalysisStoreStub(0);
+  const keywordService = createKeywordVerificationService({
+    providerMode: "mock",
+    analysisStore,
+    keywordStore: createKeywordStoreStub()
+  });
+  const handler = createKeywordVerificationHandler(
+    authService,
+    authConfig,
+    analysisConfig,
+    analysisStore,
+    keywordService
+  );
+
+  await withServer(handler, async (baseUrl) => {
+    const response = await postJsonSnapshot(
+      `${baseUrl}/api/tools/search_law_tool`,
+      {
+        query: "명예훼손 허위사실",
+        context_type: "community"
+      },
+      { authorization: "Bearer test-token" }
+    );
+
+    assert.equal(response.status, 200, "authenticated retrieval tool request should succeed without guest quota");
+    assert.equal("guest_remaining" in response.body, false, "authenticated tool response should not expose guest quota envelope");
+  });
+
+  assert.deepEqual(analysisStore.seenIps, [], "authenticated retrieval tools should not consume guest quota");
+}
+
+async function main(): Promise<void> {
+  const authConfig = createAuthConfig();
+  const analysisConfig = createAnalysisConfig();
+  const authService = createMockAuthService();
+  const analysisStore = createAnalysisStoreStub();
+  const keywordService = createKeywordVerificationService({
+    providerMode: "mock",
+    analysisStore,
+    keywordStore: createKeywordStoreStub()
+  });
+  const query = "카카오톡 단톡방에 허위사실을 올리고 전화번호를 공개했다";
+
+  const internal = await keywordService.verifyKeyword({
+    query,
+    contextType: "messenger",
+    limit: 3
+  });
+
+  assertStoredBoundary(buildStoredKeywordVerificationResponse(internal), internal);
+
+  const handler = createKeywordVerificationHandler(
+    authService,
+    authConfig,
+    analysisConfig,
+    analysisStore,
+    keywordService
+  );
+
+  await withServer(handler, async (baseUrl) => {
+    const body = await postJson(`${baseUrl}/api/keywords/verify`, {
+      query,
+      context_type: "messenger",
+      limit: 3,
+      guest_id: "guest-boundary"
+    });
+
+    assertPublicBoundary(body, internal);
+  });
+
+  await assertRetrievalToolsShareGuestQuotaBoundary();
+  await assertAuthenticatedRetrievalToolsDoNotUseGuestQuota();
+
+  process.stdout.write("Keyword HTTP boundary checks passed.\n");
+}
+
+void main().catch((error: unknown) => {
+  console.error(error);
+  process.exit(1);
+});

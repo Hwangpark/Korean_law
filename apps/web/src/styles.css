@@ -72,7 +72,25 @@ body {
 }
 
 .logo-icon {
-  font-size: 22px;
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  color: var(--navy);
+}
+
+.logo-icon svg,
+.signup-logo-icon svg,
+.context-icon svg,
+.image-upload-icon svg,
+.evidence-icon svg,
+.disclaimer-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .logo-text {
@@ -503,7 +521,19 @@ body {
   box-shadow: 0 0 0 3px rgba(37,99,235,.12);
 }
 
-.context-icon { font-size: 20px; }
+.context-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 auto 2px;
+  color: var(--navy);
+}
+
+.context-btn-active .context-icon {
+  color: var(--blue);
+}
 
 .context-label {
   font-size: 0.88rem;
@@ -545,6 +575,99 @@ body {
   font-size: 0.78rem;
   color: var(--ink-dim);
   margin-top: 6px;
+}
+
+.image-upload-block {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.image-upload-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.image-upload-label {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border: 1.5px dashed rgba(37,99,235,.28);
+  border-radius: var(--r);
+  background: linear-gradient(180deg, #fff, #f8fbff);
+  cursor: pointer;
+  transition: border-color 150ms, background 150ms, box-shadow 150ms, transform 150ms;
+}
+
+.image-upload-label:hover {
+  border-color: var(--blue);
+  background: var(--blue-light);
+  transform: translateY(-1px);
+}
+
+.image-upload-input:focus-visible + .image-upload-label {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(37,99,235,.12);
+}
+
+.image-upload-icon {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  padding: 7px;
+  border-radius: 12px;
+  background: var(--blue-light);
+  color: var(--navy);
+  flex-shrink: 0;
+}
+
+.image-upload-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.image-upload-copy strong {
+  font-size: 0.92rem;
+  color: var(--ink);
+}
+
+.image-upload-copy span {
+  font-size: 0.8rem;
+  color: var(--ink-mid);
+  line-height: 1.55;
+}
+
+.image-file-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--r);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.image-file-card strong {
+  display: block;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.88rem;
+  color: var(--ink);
+}
+
+.image-file-card span {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--ink-dim);
+  margin-top: 2px;
 }
 
 .error-banner {
@@ -1233,7 +1356,13 @@ body {
   color: var(--ink-mid);
 }
 
-.evidence-icon { font-size: 0.95rem; }
+.evidence-icon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  color: var(--blue);
+  flex-shrink: 0;
+}
 
 .disclaimer-box {
   display: flex;
@@ -1249,8 +1378,12 @@ body {
 }
 
 .disclaimer-icon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
   font-weight: 800;
   color: var(--blue);
+  flex-shrink: 0;
 }
 
 .results-footer {
@@ -1383,6 +1516,37 @@ body {
   font-size: 0.74rem;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.detail-panel-actions,
+.detail-panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.detail-panel-toolbar {
+  padding-bottom: 2px;
+}
+
+.detail-close-btn {
+  min-height: 32px;
+  border: 1px solid var(--border-mid);
+  border-radius: 999px;
+  padding: 6px 11px;
+  background: #fff;
+  color: var(--ink-mid);
+  font-size: 0.76rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 150ms, border-color 150ms, color 150ms;
+}
+
+.detail-close-btn:hover {
+  background: var(--blue-light);
+  border-color: rgba(37,99,235,.28);
+  color: var(--navy);
 }
 
 .detail-panel-body {
@@ -1624,6 +1788,12 @@ body {
     flex-direction: column;
   }
 
+  .detail-panel-actions,
+  .detail-panel-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .detail-metadata {
     grid-template-columns: 1fr;
   }
@@ -1713,7 +1883,10 @@ body {
 }
 
 .signup-logo-icon {
-  font-size: 26px;
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  color: var(--navy);
 }
 
 .signup-logo-text {

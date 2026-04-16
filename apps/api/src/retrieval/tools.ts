@@ -1,15 +1,25 @@
-import type { AuthService } from "../auth/service.js";
+﻿import type { AuthService } from "../auth/service.js";
 import { buildProfileContext } from "../analysis/profile-context.js";
+import {
+  buildLawReferenceKey,
+  buildPrecedentReferenceKey
+} from "../analysis/reference-keys.mjs";
 import type { ReferenceLibraryItem } from "../analysis/references.js";
 import type { AnalysisStore } from "../analysis/store.js";
-import { createRetrievalAdapter, type RetrievalAdapter } from "./mcp-adapter.js";
+import {
+  createRetrievalAdapter,
+  type RetrievalAdapter,
+  type RetrievalLiveProvider
+} from "./mcp-adapter.js";
 import { buildAnalysisRetrievalPlan, buildKeywordQueryPlan } from "./planner.js";
 import type {
+  EvidenceQueryRef,
   KeywordContextType,
   KeywordQueryPlan,
   LawDocumentRecord,
   PrecedentDocumentRecord,
   ProfileContext,
+  RetrievalAdapterProviderInfo,
   RetrievalPreview,
   RetrievalToolDescriptor,
   RetrievalTraceEvent
@@ -38,6 +48,7 @@ interface AnalyzeRequestLike {
 
 export interface RetrievalToolDeps {
   providerMode: string;
+  liveProvider?: RetrievalLiveProvider | null;
   authService?: AuthService;
   analysisStore?: AnalysisStore;
 }
@@ -81,6 +92,7 @@ export interface RetrievalSearchResult<TRecord> {
 
 interface RetrievalToolRuntime extends RetrievalToolDeps {
   adapter: RetrievalAdapter;
+  providerInfo: RetrievalAdapterProviderInfo;
 }
 
 const ALLOWED_CONTEXT_TYPES = new Set<KeywordContextType>([
@@ -93,7 +105,7 @@ const ALLOWED_CONTEXT_TYPES = new Set<KeywordContextType>([
 const TOOL_DESCRIPTIONS: RetrievalToolDescriptor[] = [
   {
     name: "search_law_tool",
-    description: "입력어와 문맥에 맞는 관련 법령을 검색합니다.",
+    description: "Search relevant statutes for the input text and context.",
     parameters: {
       query: "string",
       context_type: "community|game_chat|messenger|other",
@@ -102,14 +114,14 @@ const TOOL_DESCRIPTIONS: RetrievalToolDescriptor[] = [
   },
   {
     name: "get_law_detail_tool",
-    description: "search_law_tool 결과에서 받은 law_id로 법령 상세를 조회합니다.",
+    description: "Fetch statute details by law_id returned from search_law_tool.",
     parameters: {
       law_id: "string"
     }
   },
   {
     name: "search_precedent_tool",
-    description: "입력어와 문맥에 맞는 유사 판례를 검색합니다.",
+    description: "Search similar precedents for the input text and context.",
     parameters: {
       query: "string",
       context_type: "community|game_chat|messenger|other",
@@ -118,7 +130,7 @@ const TOOL_DESCRIPTIONS: RetrievalToolDescriptor[] = [
   },
   {
     name: "get_precedent_detail_tool",
-    description: "search_precedent_tool 결과에서 받은 precedent_id로 판례 상세를 조회합니다.",
+    description: "Fetch precedent details by precedent_id returned from search_precedent_tool.",
     parameters: {
       precedent_id: "string"
     }
@@ -126,9 +138,15 @@ const TOOL_DESCRIPTIONS: RetrievalToolDescriptor[] = [
 ];
 
 function createToolRuntime(deps: RetrievalToolDeps): RetrievalToolRuntime {
+  const adapter = createRetrievalAdapter({
+    providerMode: deps.providerMode,
+    liveProvider: deps.liveProvider ?? null
+  });
+
   return {
     ...deps,
-    adapter: createRetrievalAdapter(deps.providerMode)
+    adapter,
+    providerInfo: adapter.providerInfo
   };
 }
 
@@ -173,15 +191,15 @@ function buildProfileFlags(profileContext?: ProfileContext | null): string[] {
   if (profileContext.ageBand) {
     flags.push(profileContext.ageBand);
   } else if (typeof profileContext.ageYears === "number") {
-    flags.push(`${profileContext.ageYears}세`);
+    flags.push(`${profileContext.ageYears} years old`);
   }
 
   if (profileContext.isMinor) {
-    flags.push("미성년자");
+    flags.push("minor");
   }
 
   if (profileContext.nationality === "foreign") {
-    flags.push("외국인");
+    flags.push("foreign national");
   }
 
   return [...new Set(flags)];
@@ -196,28 +214,30 @@ function buildSearchPreview(
   kind: "law" | "precedent",
   records: LawDocumentRecord[] | PrecedentDocumentRecord[],
   plan: KeywordQueryPlan,
-  providerMode: string,
+  providerInfo: RetrievalAdapterProviderInfo,
   profileContext?: ProfileContext | null
 ): RetrievalPreview {
   const headline = plan.candidateIssues[0]
-    ? `"${plan.originalQuery}" 는 ${plan.candidateIssues[0].type} 쟁점 기준으로 ${kind === "law" ? "법령" : "판례"}를 먼저 조회했습니다.`
-    : `"${plan.originalQuery}" 에 대한 ${kind === "law" ? "법령" : "판례"} 후보를 먼저 조회했습니다.`;
-  const disclaimer = providerMode === "live"
-    ? "공식 API 조회 결과를 우선 사용했고, 부족한 경우 저장된 참조 라이브러리로 보강했습니다."
-    : "mock fixture 조회 결과를 기준으로 tool chain을 미리 검증한 상태입니다.";
+    ? `Searched ${kind === "law" ? "statutes" : "precedents"} for "${plan.originalQuery}" using the ${plan.candidateIssues[0].type} issue signal.`
+    : `Searched ${kind === "law" ? "statutes" : "precedents"} for "${plan.originalQuery}".`;
+  const disclaimer = providerInfo.source === "live"
+    ? "Official provider results were normalized into the same retrieval contract as fixtures."
+    : providerInfo.source === "live_fallback"
+      ? "Live provider was requested but not injected, so deterministic fixture results were used."
+      : "Deterministic fixture results were used for mock-first retrieval validation.";
 
   const topLaws = kind === "law"
     ? (records as LawDocumentRecord[]).slice(0, 3).map((record) => ({
         id: buildPreviewCardId("law", `${record.law_name} ${record.article_no}`.trim(), record.article_no),
         title: `${record.law_name} ${record.article_no}`.trim(),
-        summary: record.article_title || record.content || record.penalty || "관련 조문"
+        summary: record.article_title || record.content || record.penalty || "Related statute"
       }))
     : [];
   const topPrecedents = kind === "precedent"
     ? (records as PrecedentDocumentRecord[]).slice(0, 3).map((record) => ({
         id: buildPreviewCardId("precedent", record.case_no, record.case_no),
         title: `${record.case_no} ${record.court}`.trim(),
-        summary: record.summary || record.key_reasoning || record.verdict || "유사 판례"
+        summary: record.summary || record.key_reasoning || record.verdict || "Similar precedent"
       }))
     : [];
 
@@ -239,7 +259,8 @@ function buildTraceEvent(
   inputRef: string,
   outputRef: string[],
   reason: string,
-  cacheHit = false
+  cacheHit = false,
+  queryRefs: EvidenceQueryRef[] = []
 ): RetrievalTraceEvent {
   return {
     stage,
@@ -249,24 +270,38 @@ function buildTraceEvent(
     cache_hit: cacheHit,
     input_ref: inputRef,
     output_ref: outputRef,
-    reason
+    reason,
+    ...(queryRefs.length > 0 ? { query_refs: queryRefs } : {})
   };
 }
 
 function buildQueryPlanTrace(
   plan: KeywordQueryPlan,
-  providerMode: string,
+  providerInfo: RetrievalAdapterProviderInfo,
   tool = "build_query_plan"
 ): RetrievalTraceEvent[] {
+  const queryRefs = [
+    ...(plan.lawQueryRefs ?? []),
+    ...(plan.precedentQueryRefs ?? [])
+  ];
+  const querySources = [...new Set(
+    plan.candidateIssues
+      .flatMap((issue) => issue.querySources ?? [])
+      .map((source) => String(source ?? "").trim())
+      .filter(Boolean)
+  )];
+
   return [
     buildTraceEvent(
       "planner",
       tool,
-      providerMode,
+      providerInfo.provider,
       0,
       `query:${plan.originalQuery}`,
       plan.candidateIssues.map((issue) => issue.type),
-      `${plan.candidateIssues.length}개 쟁점을 기준으로 질의를 확장했습니다.`
+      `Built retrieval plan from ${plan.candidateIssues.length} candidate issues.${querySources.length > 0 ? ` query_source=${querySources.join(",")}` : ""}`,
+      false,
+      queryRefs
     )
   ];
 }
@@ -312,7 +347,7 @@ async function materializeReferenceItems(
   }
 
   return runtime.analysisStore.saveReferenceLibrary({
-    providerMode: runtime.providerMode,
+    providerMode: runtime.providerInfo.provider,
     result
   });
 }
@@ -327,22 +362,24 @@ async function searchLawsWithPlan(
   const startedMs = Date.now();
   const records = await runtime.adapter.searchLaws(plan, normalizedLimit);
   const trace = [
-    ...buildQueryPlanTrace(plan, runtime.providerMode),
+    ...buildQueryPlanTrace(plan, runtime.providerInfo),
     buildTraceEvent(
       "law",
       "search_law_tool",
-      runtime.providerMode,
+      runtime.providerInfo.provider,
       Date.now() - startedMs,
       `query:${plan.originalQuery}|context:${plan.contextType}|limit:${normalizedLimit}`,
-      records.map((record) => `law:${record.law_name}:${record.article_no}`),
-      `${records.length}건의 법령 후보를 반환했습니다.`
+      records.map((record) => buildLawReferenceKey(record.law_name, record.article_no)),
+      `Returned ${records.length} law matches. provider_source=${runtime.providerInfo.source}`,
+      false,
+      plan.lawQueryRefs ?? []
     )
   ];
 
   return {
-    provider: runtime.providerMode,
+    provider: runtime.providerInfo.provider,
     records,
-    retrieval_preview: buildSearchPreview("law", records, plan, runtime.providerMode, profileContext),
+    retrieval_preview: buildSearchPreview("law", records, plan, runtime.providerInfo, profileContext),
     retrieval_trace: trace
   };
 }
@@ -357,22 +394,24 @@ async function searchPrecedentsWithPlan(
   const startedMs = Date.now();
   const records = await runtime.adapter.searchPrecedents(plan, normalizedLimit);
   const trace = [
-    ...buildQueryPlanTrace(plan, runtime.providerMode),
+    ...buildQueryPlanTrace(plan, runtime.providerInfo),
     buildTraceEvent(
       "precedent",
       "search_precedent_tool",
-      runtime.providerMode,
+      runtime.providerInfo.provider,
       Date.now() - startedMs,
       `query:${plan.originalQuery}|context:${plan.contextType}|limit:${normalizedLimit}`,
-      records.map((record) => `precedent:${record.case_no}`),
-      `${records.length}건의 판례 후보를 반환했습니다.`
+      records.map((record) => buildPrecedentReferenceKey(record.case_no)),
+      `Returned ${records.length} precedent matches. provider_source=${runtime.providerInfo.source}`,
+      false,
+      plan.precedentQueryRefs ?? []
     )
   ];
 
   return {
-    provider: runtime.providerMode,
+    provider: runtime.providerInfo.provider,
     records,
-    retrieval_preview: buildSearchPreview("precedent", records, plan, runtime.providerMode, profileContext),
+    retrieval_preview: buildSearchPreview("precedent", records, plan, runtime.providerInfo, profileContext),
     retrieval_trace: trace
   };
 }
@@ -611,3 +650,4 @@ export function createRetrievalTools(deps: RetrievalToolDeps) {
 }
 
 export type RetrievalTools = ReturnType<typeof createRetrievalTools>;
+

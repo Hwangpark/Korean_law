@@ -29,6 +29,10 @@ interface GuestUsageRow {
   usage_count: number;
 }
 
+interface GuestIpUsageRow {
+  usage_count: number;
+}
+
 export interface SaveAnalysisInput {
   userId: number;
   inputMode: "text" | "image" | "link";
@@ -46,6 +50,7 @@ export interface SaveAnalysisInput {
   preview?: unknown;
   trace?: unknown[];
   profileSnapshot?: Record<string, unknown> | null;
+  persistSourceDocument?: boolean;
 }
 
 export interface SaveReferenceLibraryInput {
@@ -68,11 +73,16 @@ export interface AnalysisHistoryItem {
 }
 
 export interface GuestUsageResult {
-  guestId: string;
+  guestId: string | null;
   usageCount: number;
   limit: number;
   remaining: number;
   allowed: boolean;
+}
+
+export interface GuestUsageIdentity {
+  guestId?: string | null;
+  ipAddress: string;
 }
 
 export interface AnalysisStore {
@@ -80,7 +90,7 @@ export interface AnalysisStore {
   saveAnalysis(input: SaveAnalysisInput): Promise<{ caseId: string; runId: string; referenceLibrary: ReferenceLibraryItem[] }>;
   saveReferenceLibrary(input: SaveReferenceLibraryInput): Promise<ReferenceLibraryItem[]>;
   listHistory(userId: number, limit?: number): Promise<AnalysisHistoryItem[]>;
-  consumeGuestAnalysis(guestId: string, limit?: number): Promise<GuestUsageResult>;
+  consumeGuestAnalysis(identity: GuestUsageIdentity, limit?: number): Promise<GuestUsageResult>;
   searchReferences(query: string, limit?: number): Promise<ReferenceLibraryItem[]>;
   getReferenceByKindAndId(kind: "law" | "precedent", id: string): Promise<ReferenceDetailItem | null>;
 }
@@ -91,6 +101,20 @@ function stableHash(value: string): string {
 
 function toJson(value: unknown): string {
   return JSON.stringify(value ?? {});
+}
+
+function currentKstDate(): string {
+  const formatter = new Intl.DateTimeFormat("en", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
+  const parts = formatter.formatToParts(new Date());
+  const year = parts.find((part) => part.type === "year")?.value ?? "1970";
+  const month = parts.find((part) => part.type === "month")?.value ?? "01";
+  const day = parts.find((part) => part.type === "day")?.value ?? "01";
+  return `${year}-${month}-${day}`;
 }
 
 export function createAnalysisStore(db: PostgresClient): AnalysisStore {
@@ -169,6 +193,20 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
+    `);
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS guest_analysis_ip_usage (
+        usage_key TEXT PRIMARY KEY,
+        ip_hash TEXT NOT NULL,
+        usage_date DATE NOT NULL,
+        usage_count INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.query(`
+      CREATE INDEX IF NOT EXISTS guest_analysis_ip_usage_date_idx
+      ON guest_analysis_ip_usage (usage_date, updated_at DESC)
     `);
     await db.query(`
       CREATE TABLE IF NOT EXISTS reference_library (
@@ -316,31 +354,33 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
       throw new Error("Failed to create analysis case.");
     }
 
-    await db.query(
-      `
-        INSERT INTO source_documents (
-          case_id,
-          source_kind,
-          original_filename,
-          source_url,
-          mime_type,
-          content_text,
-          content_hash,
-          metadata
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
-      `,
-      [
-        caseId,
-        input.sourceKind,
-        input.originalFilename ?? null,
-        input.sourceUrl ?? null,
-        input.mimeType ?? null,
-        input.contentText,
-        stableHash(input.contentText),
-        toJson(input.metadata ?? {})
-      ]
-    );
+    if (input.persistSourceDocument !== false && input.contentText.trim()) {
+      await db.query(
+        `
+          INSERT INTO source_documents (
+            case_id,
+            source_kind,
+            original_filename,
+            source_url,
+            mime_type,
+            content_text,
+            content_hash,
+            metadata
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+        `,
+        [
+          caseId,
+          input.sourceKind,
+          input.originalFilename ?? null,
+          input.sourceUrl ?? null,
+          input.mimeType ?? null,
+          input.contentText,
+          stableHash(input.contentText),
+          toJson(input.metadata ?? {})
+        ]
+      );
+    }
 
     const legalAnalysis = (input.result.legal_analysis ?? {}) as Record<string, unknown>;
     const runResult = await db.query<IdRow>(
@@ -428,30 +468,35 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
     });
   }
 
-  async function consumeGuestAnalysis(guestId: string, limit = 3): Promise<GuestUsageResult> {
-    const normalizedGuestId = String(guestId ?? "").trim();
-    if (!normalizedGuestId) {
-      throw new Error("guest_id is required for guest analysis.");
+  async function consumeGuestAnalysis(identity: GuestUsageIdentity, limit = 10): Promise<GuestUsageResult> {
+    const guestId = String(identity.guestId ?? "").trim() || null;
+    const normalizedIp = String(identity.ipAddress ?? "").trim();
+    if (!normalizedIp) {
+      throw new Error("ipAddress is required for guest analysis.");
     }
 
-    const allowedResult = await db.query<GuestUsageRow>(
+    const usageDate = currentKstDate();
+    const ipHash = stableHash(normalizedIp);
+    const usageKey = stableHash(`${ipHash}:${usageDate}`);
+
+    const allowedResult = await db.query<GuestIpUsageRow>(
       `
-        INSERT INTO guest_analysis_usage (guest_id, usage_count)
-        VALUES ($1, 1)
-        ON CONFLICT (guest_id)
+        INSERT INTO guest_analysis_ip_usage (usage_key, ip_hash, usage_date, usage_count)
+        VALUES ($1, $2, $3::date, 1)
+        ON CONFLICT (usage_key)
         DO UPDATE SET
-          usage_count = guest_analysis_usage.usage_count + 1,
+          usage_count = guest_analysis_ip_usage.usage_count + 1,
           updated_at = NOW()
-        WHERE guest_analysis_usage.usage_count < $2
+        WHERE guest_analysis_ip_usage.usage_count < $4
         RETURNING usage_count
       `,
-      [normalizedGuestId, limit]
+      [usageKey, ipHash, usageDate, limit]
     );
 
     const allowedUsageCount = Number(allowedResult.rows[0]?.usage_count ?? 0);
     if (allowedUsageCount > 0) {
       return {
-        guestId: normalizedGuestId,
+        guestId,
         usageCount: allowedUsageCount,
         limit,
         remaining: Math.max(limit - allowedUsageCount, 0),
@@ -459,14 +504,14 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
       };
     }
 
-    const currentResult = await db.query<GuestUsageRow>(
-      "SELECT usage_count FROM guest_analysis_usage WHERE guest_id = $1 LIMIT 1",
-      [normalizedGuestId]
+    const currentResult = await db.query<GuestIpUsageRow>(
+      "SELECT usage_count FROM guest_analysis_ip_usage WHERE usage_key = $1 LIMIT 1",
+      [usageKey]
     );
     const currentUsageCount = Number(currentResult.rows[0]?.usage_count ?? limit);
 
     return {
-      guestId: normalizedGuestId,
+      guestId,
       usageCount: currentUsageCount,
       limit,
       remaining: 0,

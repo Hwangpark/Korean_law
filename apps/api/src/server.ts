@@ -4,6 +4,7 @@ import { createAuthHandler, createAuthService, loadAuthConfig } from "./auth/ind
 import { createPostgresClient } from "./auth/postgres.js";
 import { loadAnalysisConfig } from "./analysis/config.js";
 import { createAnalysisHandler } from "./analysis/http.js";
+import { createAnalysisJobManager } from "./analysis/jobs.js";
 import { createAnalysisStore } from "./analysis/store.js";
 import {
   createKeywordVerificationHandler,
@@ -17,6 +18,7 @@ async function main(): Promise<void> {
   const service = createAuthService(config);
   const analysisDb = createPostgresClient(config.database);
   const analysisStore = createAnalysisStore(analysisDb);
+  const analysisJobManager = createAnalysisJobManager();
   const keywordStore = createKeywordVerificationStore(analysisDb);
   const keywordService = createKeywordVerificationService({
     providerMode: analysisConfig.providerMode,
@@ -29,7 +31,13 @@ async function main(): Promise<void> {
   await keywordStore.ensureSchema();
 
   const handler = createAuthHandler(service, config);
-  const analysisHandler = createAnalysisHandler(service, config, analysisConfig, analysisStore);
+  const analysisHandler = createAnalysisHandler(
+    service,
+    config,
+    analysisConfig,
+    analysisStore,
+    analysisJobManager
+  );
   const keywordHandler = createKeywordVerificationHandler(
     service,
     config,

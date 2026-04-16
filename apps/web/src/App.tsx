@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 
 import './styles.css';
 import {
@@ -8,6 +8,7 @@ import {
   clearStoredToken,
   verifyEmailCode,
   evaluatePasswordPolicy,
+  fetchAnalysisResult,
   fetchMe,
   getInitialAuthBaseUrl,
   getInitialGuestSession,
@@ -18,6 +19,7 @@ import {
     signup,
     verifyKeyword,
     type AnalyzeCaseResponse,
+    type AnalyzeJobStartResponse,
   type AnalysisLegalResult,
   type AnalysisReferenceItem,
     type AuthResponse,
@@ -28,10 +30,17 @@ import {
 
 const AUTH_BASE_URL = getInitialAuthBaseUrl();
 const ANALYSIS_BASE_URL = import.meta.env.VITE_ANALYSIS_BASE_URL ?? AUTH_BASE_URL ?? DEFAULT_AUTH_BASE_URL;
+const RUNTIME_MODE = (import.meta.env.VITE_LAW_PROVIDER ?? 'mock').toLowerCase();
+const RUNTIME_IS_LIVE = RUNTIME_MODE === 'live';
+const RUNTIME_BADGE = RUNTIME_IS_LIVE ? 'LIVE' : 'MOCK';
+const RUNTIME_NOTICE = RUNTIME_IS_LIVE
+  ? 'LIVE 설정입니다. 실제 provider가 주입되지 않으면 서버가 fixture fallback을 사용할 수 있습니다.'
+  : '현재 로컬 검색은 law.go.kr 실시간 조회가 아니라 mock fixture 기반입니다. 그래서 응답이 매우 빠르게 끝납니다.';
 
 type ContextType = 'community' | 'game_chat' | 'messenger' | 'other';
 type View = 'input' | 'analyzing' | 'results' | 'signup' | 'login';
 type AuthMode = 'login' | 'signup';
+type IconName = 'community' | 'game' | 'messenger' | 'document';
 
 type Charge = {
   charge: string;
@@ -103,13 +112,25 @@ type ProfileGuidance = {
 };
 
 type PendingAnalysis = {
-  text: string;
+  inputMode: 'text' | 'image';
   contextType: ContextType;
+  text?: string;
+  imageFile?: File;
 };
 
 type PendingKeyword = {
   keyword: string;
   contextType: ContextType;
+};
+
+type AnalysisStreamEvent = {
+  type?: string;
+  agent?: string;
+  at?: string;
+  duration_ms?: number;
+  result?: unknown;
+  analysis?: unknown;
+  message?: string;
 };
 
 type DetailReference = {
@@ -272,11 +293,11 @@ function normalizeProfileGuidance(value: unknown): ProfileGuidance | null {
   };
 }
 
-const CONTEXT_OPTIONS: { value: ContextType; label: string; icon: string; desc: string }[] = [
-  { value: 'community', label: '커뮤니티', icon: '📋', desc: '인터넷 게시글·댓글' },
-  { value: 'game_chat', label: '게임 채팅', icon: '🎮', desc: '인게임 채팅·메시지' },
-  { value: 'messenger', label: '메신저', icon: '💬', desc: '카카오톡·라인 등' },
-  { value: 'other', label: '기타', icon: '📄', desc: '그 외 온라인 대화' },
+const CONTEXT_OPTIONS: { value: ContextType; label: string; icon: IconName; desc: string }[] = [
+  { value: 'community', label: '커뮤니티', icon: 'community', desc: '인터넷 게시글·댓글' },
+  { value: 'game_chat', label: '게임 채팅', icon: 'game', desc: '인게임 채팅·메시지' },
+  { value: 'messenger', label: '메신저', icon: 'messenger', desc: '카카오톡·라인 등' },
+  { value: 'other', label: '기타', icon: 'document', desc: '그 외 온라인 대화' },
 ];
 
 const AGENT_STEPS = [
@@ -287,8 +308,93 @@ const AGENT_STEPS = [
   { id: 'analysis', label: '종합 분석', desc: '법적 판단을 생성합니다' },
 ];
 
-function delay(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
+function ScaleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M12 3v18" />
+      <path d="M5 6h14" />
+      <path d="M7 6l-4 7h8L7 6Z" />
+      <path d="M17 6l-4 7h8l-4-7Z" />
+      <path d="M8 21h8" />
+    </svg>
+  );
+}
+
+function AttachmentIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M21 12.2 12.8 20a6 6 0 0 1-8.3-8.6l9.3-8.9a4 4 0 0 1 5.6 5.7l-9.2 8.8a2 2 0 0 1-2.8-2.9l8.5-8.1" />
+    </svg>
+  );
+}
+
+function InfoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 10v6" />
+      <path d="M12 7.5h.01" />
+    </svg>
+  );
+}
+
+function ContextIcon({ name }: { name: IconName }) {
+  const commonProps = {
+    viewBox: '0 0 24 24',
+    'aria-hidden': true,
+    focusable: false,
+  } as const;
+
+  if (name === 'community') {
+    return (
+      <span className="context-icon">
+        <svg {...commonProps}>
+          <path d="M5 6.5h14" />
+          <path d="M5 12h10" />
+          <path d="M5 17.5h7" />
+          <path d="M4 3h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H8l-4 3v-3H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
+        </svg>
+      </span>
+    );
+  }
+
+  if (name === 'game') {
+    return (
+      <span className="context-icon">
+        <svg {...commonProps}>
+          <path d="M7 10h4" />
+          <path d="M9 8v4" />
+          <path d="M16 10h.01" />
+          <path d="M18 13h.01" />
+          <path d="M7.5 6h9A5.5 5.5 0 0 1 22 11.5v2A4.5 4.5 0 0 1 17.5 18c-1.3 0-2.2-.8-3-1.6A3.5 3.5 0 0 0 12 15.3a3.5 3.5 0 0 0-2.5 1.1c-.8.8-1.7 1.6-3 1.6A4.5 4.5 0 0 1 2 13.5v-2A5.5 5.5 0 0 1 7.5 6Z" />
+        </svg>
+      </span>
+    );
+  }
+
+  if (name === 'messenger') {
+    return (
+      <span className="context-icon">
+        <svg {...commonProps}>
+          <path d="M4 11.5C4 7.9 7.6 5 12 5s8 2.9 8 6.5S16.4 18 12 18a9.4 9.4 0 0 1-2-.2L5 20l1.3-3.1A6.2 6.2 0 0 1 4 11.5Z" />
+          <path d="M8 11.5h.01" />
+          <path d="M12 11.5h.01" />
+          <path d="M16 11.5h.01" />
+        </svg>
+      </span>
+    );
+  }
+
+  return (
+    <span className="context-icon">
+      <svg {...commonProps}>
+        <path d="M7 3h7l5 5v13H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+        <path d="M14 3v6h5" />
+        <path d="M8 13h8" />
+        <path d="M8 17h6" />
+      </svg>
+    </span>
+  );
 }
 
 function RiskBadge({ level }: { level: number }) {
@@ -519,37 +625,6 @@ function buildPrecedentDetail(precedent: PrecedentCard, index: number): DetailPa
   );
 }
 
-function buildResultDetail(result: AnalysisResult): DetailPanelData | null {
-  const firstCharge = result.charges[0];
-  if (firstCharge) {
-    return buildChargeDetail(firstCharge, 0);
-  }
-
-  const firstPrecedent = result.precedent_cards[0];
-  if (firstPrecedent) {
-    return buildPrecedentDetail(firstPrecedent, 0);
-  }
-
-  const references = collectReferenceItems({
-    reference_library: result.reference_library,
-    law_reference_library: result.law_reference_library,
-    precedent_reference_library: result.precedent_reference_library,
-  });
-
-  if (references.length > 0) {
-    return {
-      eyebrow: '근거 라이브러리',
-      title: '참고 자료',
-      summary: result.summary,
-      metadata: [{ label: '참고 수', value: `${references.length}개` }],
-      highlights: [],
-      references,
-    };
-  }
-
-  return null;
-}
-
 function buildReferenceDetail(
   reference: AnalysisReferenceItem,
   kind: 'law' | 'precedent',
@@ -721,35 +796,8 @@ function normalizeAnalysisResult(
   };
 }
 
-function selectInlineDetail(result: AnalysisResult): DetailPanelData | null {
-  const firstLawReference = result.law_reference_library?.[0];
-  if (firstLawReference) {
-    return buildReferenceDetail(firstLawReference, 'law', 0);
-  }
-
-  const firstPrecedentReference = result.precedent_reference_library?.[0];
-  if (firstPrecedentReference) {
-    return buildReferenceDetail(firstPrecedentReference, 'precedent', 0);
-  }
-
-  const firstCharge = result.charges[0];
-  if (firstCharge) {
-    return buildChargeDetail(firstCharge, 0);
-  }
-
-  const firstPrecedent = result.precedent_cards[0];
-  if (firstPrecedent) {
-    return buildPrecedentDetail(firstPrecedent, 0);
-  }
-
-  return buildResultDetail(result);
-}
-
-function mergeProfileResult(
-  analysis: AnalysisResult,
-  response: AnalyzeCaseResponse,
-): AnalysisResult {
-  const payload = response as Record<string, unknown>;
+function mergeProfileResult(analysis: AnalysisResult, response: Record<string, unknown>): AnalysisResult {
+  const payload = response;
   const responseProfileContext = normalizeProfileContext(payload.profile_context);
   const responseProfileGuidance = normalizeProfileGuidance(payload.profile_guidance);
   const responseProfileConsiderations = toTextList(payload.profile_considerations);
@@ -762,6 +810,122 @@ function mergeProfileResult(
       analysis.profile_considerations && analysis.profile_considerations.length > 0
         ? analysis.profile_considerations
         : responseProfileConsiderations,
+  };
+}
+
+function readGuestRemaining(payload: Record<string, unknown>, fallback: number) {
+  if (typeof payload.guest_remaining === 'number') {
+    return Math.max(0, payload.guest_remaining);
+  }
+
+  if (
+    payload.meta &&
+    typeof payload.meta === 'object' &&
+    typeof (payload.meta as { guest_remaining?: unknown }).guest_remaining === 'number'
+  ) {
+    return Math.max(0, (payload.meta as { guest_remaining: number }).guest_remaining);
+  }
+
+  return fallback;
+}
+
+function looksLikeFinalAnalysis(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    'can_sue' in value ||
+    'risk_level' in value ||
+    'summary' in value ||
+    'charges' in value ||
+    'precedent_cards' in value ||
+    'disclaimer' in value ||
+    'recommended_actions' in value ||
+    'evidence_to_collect' in value ||
+    'reference_library' in value ||
+    'law_reference_library' in value ||
+    'precedent_reference_library' in value
+  );
+}
+
+function normalizeCompletedAnalysisResponse(response: unknown): AnalysisResult | null {
+  const source = unwrapCompletedAnalysis(response);
+  if (!looksLikeFinalAnalysis(source)) {
+    return null;
+  }
+
+  const responseRecord = isRecord(response) ? response : {};
+  const referenceSource =
+    responseRecord.reference_library ??
+    responseRecord.referenceLibrary ??
+    responseRecord.references ??
+    responseRecord.law_reference_library ??
+    responseRecord.precedent_reference_library ??
+    responseRecord.laws ??
+    responseRecord.precedents ??
+    source;
+
+  return normalizeAnalysisResult(source as AnalysisLegalResultWithProfile, collectReferenceItems(referenceSource));
+}
+
+function unwrapCompletedAnalysis(value: unknown): unknown {
+  let current = value;
+
+  while (isRecord(current)) {
+    const next = current.legal_analysis ?? current.analysis ?? current.result;
+    if (!isRecord(next)) {
+      break;
+    }
+    current = next;
+  }
+
+  return current;
+}
+
+function fileToBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('이미지 파일을 읽는 데 실패했습니다.'));
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      const commaIndex = result.indexOf(',');
+      resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function buildAnalyzeJobPayload(
+  snapshot: PendingAnalysis,
+  guestId: string | null,
+): Promise<Parameters<typeof analyzeCase>[2]> | Parameters<typeof analyzeCase>[2] {
+  if (snapshot.inputMode === 'image') {
+    const imageFile = snapshot.imageFile;
+    if (!imageFile) {
+      throw new Error('이미지 파일이 선택되지 않았습니다.');
+    }
+
+    return (async () => {
+      const imageBase64 = await fileToBase64(imageFile);
+      return {
+        title: imageFile.name || '이미지 분석',
+        context_type: snapshot.contextType,
+        input_mode: 'image',
+        image_base64: imageBase64,
+        image_name: imageFile.name,
+        image_mime_type: imageFile.type || 'application/octet-stream',
+        ...(guestId ? { guest_id: guestId } : {}),
+      };
+    })();
+  }
+
+  return {
+    title: '텍스트 분석',
+    context_type: snapshot.contextType,
+    input_mode: 'text',
+    text: snapshot.text?.trim() ?? '',
+    ...(guestId ? { guest_id: guestId } : {}),
   };
 }
 
@@ -778,8 +942,11 @@ function PolicyRule({ label, passed }: { label: string; passed: boolean }) {
 export default function App() {
   const [view, setView] = useState<View>('input');
   const [text, setText] = useState('');
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
   const [contextType, setContextType] = useState<ContextType>('community');
   const [agentProgress, setAgentProgress] = useState<string[]>([]);
+  const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<DetailPanelData | null>(null);
@@ -814,6 +981,10 @@ export default function App() {
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [verifyInfo, setVerifyInfo] = useState<string | null>(null);
   const [verifyBusy, setVerifyBusy] = useState(false);
+  const analysisStreamRef = useRef<EventSource | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const detailPanelRef = useRef<HTMLElement | null>(null);
+  const keywordDetailPanelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     saveGuestSession(guestSession);
@@ -855,25 +1026,85 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!result) {
-      setSelectedDetail(null);
-      return;
-    }
+    return () => {
+      const currentStream = analysisStreamRef.current;
+      if (currentStream) {
+        currentStream.close();
+      }
+      analysisStreamRef.current = null;
+    };
+  }, []);
 
-    setSelectedDetail(buildResultDetail(result));
+  useEffect(() => {
+    setSelectedDetail(null);
   }, [result]);
 
   useEffect(() => {
-    if (!keywordResult) {
-      setSelectedKeywordDetail(null);
+    setSelectedKeywordDetail(null);
+  }, [keywordResult]);
+
+  useEffect(() => {
+    if (!selectedDetail || window.innerWidth > 960) {
       return;
     }
 
-    setSelectedKeywordDetail(selectInlineDetail(keywordResult));
-  }, [keywordResult]);
+    window.setTimeout(() => {
+      detailPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
+  }, [selectedDetail]);
+
+  useEffect(() => {
+    if (!selectedKeywordDetail) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      keywordDetailPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
+  }, [selectedKeywordDetail]);
 
   const passwordPolicy = evaluatePasswordPolicy(authPassword);
   const canUseGuest = guestSession.guestRemaining > 0;
+
+  function closeAnalysisStream() {
+    const currentStream = analysisStreamRef.current;
+    if (currentStream) {
+      currentStream.close();
+    }
+    analysisStreamRef.current = null;
+  }
+
+  function syncGuestQuota(payload: Record<string, unknown>, token: string | null) {
+    if (token) {
+      return;
+    }
+
+    setGuestSession((prev) => ({
+      guestId:
+        typeof payload.guest_id === 'string'
+          ? payload.guest_id
+          : payload.meta &&
+              typeof payload.meta === 'object' &&
+              typeof (payload.meta as { guest_id?: unknown }).guest_id === 'string'
+            ? ((payload.meta as { guest_id: string }).guest_id)
+            : prev.guestId,
+      guestRemaining: readGuestRemaining(payload, prev.guestRemaining),
+    }));
+  }
+
+  function applyCompletedAnalysis(response: unknown, token: string | null) {
+    const analysis = normalizeCompletedAnalysisResponse(response);
+    if (!analysis) {
+      throw new Error('분석 결과를 불러오지 못했습니다.');
+    }
+
+    const responseRecord = isRecord(response) ? response : {};
+    syncGuestQuota(responseRecord, token);
+    setActiveAgentId(null);
+    setResult(mergeProfileResult(analysis, responseRecord));
+    setPendingAnalysis(null);
+    setView('results');
+  }
 
   function openLoginPage(errorMessage?: string) {
     setAuthError(errorMessage ?? null);
@@ -891,56 +1122,145 @@ export default function App() {
   async function runAnalysis(snapshot: PendingAnalysis, token: string | null) {
     setAnalysisError(null);
     setAgentProgress([]);
+    setActiveAgentId(null);
     setView('analyzing');
     setAuthError(null);
-
-    AGENT_STEPS.forEach((step, index) => {
-      window.setTimeout(() => {
-        setAgentProgress((prev) => (prev.includes(step.id) ? prev : [...prev, step.id]));
-      }, index * 600);
-    });
+    closeAnalysisStream();
 
     try {
-      const response = (await analyzeCase(ANALYSIS_BASE_URL, token, {
-        title: '텍스트 분석',
-        input_mode: 'text',
-        text: snapshot.text.trim(),
-        context_type: snapshot.contextType,
-        ...(token
-          ? {}
-          : {
-              guest_id: guestSession.guestId,
-            }),
-      })) as AnalyzeCaseResponse;
+      const payload = await buildAnalyzeJobPayload(snapshot, token ? null : guestSession.guestId);
+      const startResponse = (await analyzeCase(ANALYSIS_BASE_URL, token, payload as Parameters<typeof analyzeCase>[2])) as AnalyzeJobStartResponse;
 
-      await delay(AGENT_STEPS.length * 600 + 300);
+      syncGuestQuota(startResponse as Record<string, unknown>, token);
 
-      const analysis = normalizeAnalysisResult(
-        response.legal_analysis,
-        collectReferenceItems(response.reference_library),
-      );
-      if (!analysis) {
-        throw new Error('분석 결과를 불러오지 못했습니다.');
+      const jobId = typeof startResponse.job_id === 'string' ? startResponse.job_id : '';
+      if (!jobId) {
+        throw new Error('분석 작업 ID를 받지 못했습니다.');
       }
 
-      if (!token) {
-        const nextRemaining =
-          typeof response.guest_remaining === 'number'
-            ? Math.max(0, response.guest_remaining)
-            : Math.max(0, guestSession.guestRemaining - 1);
+      const streamPath =
+        typeof startResponse.stream_url === 'string' && startResponse.stream_url
+          ? startResponse.stream_url
+          : `/api/analyze/${encodeURIComponent(jobId)}/stream`;
+      const streamUrl = /^https?:\/\//i.test(streamPath)
+        ? streamPath
+        : `${ANALYSIS_BASE_URL.replace(/\/+$/, '')}${streamPath.startsWith('/') ? '' : '/'}${streamPath}`;
 
-        setGuestSession({
-          guestId: response.guest_id ?? response.meta?.guest_id ?? guestSession.guestId,
-          guestRemaining: nextRemaining,
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const stream = new EventSource(streamUrl);
+        analysisStreamRef.current = stream;
+
+        const closeStream = () => {
+          stream.close();
+          if (analysisStreamRef.current === stream) {
+            analysisStreamRef.current = null;
+          }
+        };
+
+        const failStream = async (fallbackMessage?: string) => {
+          if (settled) {
+            return;
+          }
+
+          try {
+            const response = await fetchAnalysisResult(ANALYSIS_BASE_URL, jobId);
+            if (normalizeCompletedAnalysisResponse(response)) {
+              settled = true;
+              closeStream();
+              applyCompletedAnalysis(response, token);
+              resolve();
+              return;
+            }
+          } catch {
+            // Ignore fallback fetch failures and surface the original stream issue below.
+          }
+
+          settled = true;
+          closeStream();
+          reject(new Error(fallbackMessage ?? '분석 스트림 연결 중 오류가 발생했습니다.'));
+        };
+
+        stream.addEventListener('agent_start', (event) => {
+          if (!(event instanceof MessageEvent)) {
+            return;
+          }
+
+          try {
+            const payload = JSON.parse(event.data) as AnalysisStreamEvent;
+            if (typeof payload.agent === 'string') {
+              setActiveAgentId(payload.agent);
+            }
+          } catch {
+            // Ignore malformed stream payloads.
+          }
         });
-      }
 
-      setResult(mergeProfileResult(analysis, response));
-      setPendingAnalysis(null);
-      setView('results');
+        stream.addEventListener('agent_done', (event) => {
+          if (!(event instanceof MessageEvent)) {
+            return;
+          }
+
+          try {
+            const payload = JSON.parse(event.data) as AnalysisStreamEvent;
+            if (typeof payload.agent === 'string') {
+              setAgentProgress((prev) => (prev.includes(payload.agent as string) ? prev : [...prev, payload.agent as string]));
+              setActiveAgentId((prev) => (prev === payload.agent ? null : prev));
+            }
+          } catch {
+            // Ignore malformed stream payloads.
+          }
+        });
+
+        stream.addEventListener('complete', (event) => {
+          if (!(event instanceof MessageEvent) || settled) {
+            return;
+          }
+
+          try {
+            const payload = JSON.parse(event.data) as AnalysisStreamEvent;
+            const response = payload.analysis ?? payload.result ?? payload;
+            settled = true;
+            closeStream();
+            applyCompletedAnalysis(response, token);
+            resolve();
+          } catch (error) {
+            settled = true;
+            closeStream();
+            reject(error instanceof Error ? error : new Error('분석 결과를 처리하지 못했습니다.'));
+          }
+        });
+
+        stream.addEventListener('error', (event) => {
+          if (settled) {
+            return;
+          }
+
+          if (event instanceof MessageEvent) {
+            try {
+              const payload = JSON.parse(event.data) as AnalysisStreamEvent;
+              void failStream(payload.message || '분석 중 오류가 발생했습니다.');
+              return;
+            } catch {
+              void failStream('분석 중 오류가 발생했습니다.');
+              return;
+            }
+          }
+
+          void failStream();
+        });
+
+        stream.onerror = () => {
+          if (!settled) {
+            void failStream();
+          }
+        };
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : '분석 중 오류가 발생했습니다.';
       const unauthorized = /unauthorized|401/i.test(message);
+      closeAnalysisStream();
+      setActiveAgentId(null);
 
       if (unauthorized && token) {
         clearStoredToken();
@@ -979,17 +1299,7 @@ export default function App() {
         throw new Error('검증 결과를 불러오지 못했습니다.');
       }
 
-      if (!token) {
-        const nextRemaining =
-          typeof response.guest_remaining === 'number'
-            ? Math.max(0, response.guest_remaining)
-            : Math.max(0, guestSession.guestRemaining - 1);
-
-        setGuestSession({
-          guestId: response.guest_id ?? response.meta?.guest_id ?? guestSession.guestId,
-          guestRemaining: nextRemaining,
-        });
-      }
+      syncGuestQuota(response as Record<string, unknown>, token);
 
       setKeywordResult(mergeProfileResult(analysis, response));
       setPendingKeyword(null);
@@ -1011,12 +1321,39 @@ export default function App() {
     }
   }
 
-  async function handleAnalyzeClick() {
-    if (!text.trim()) {
+  function clearImageSelection() {
+    setSelectedImageFile(null);
+    setImageError(null);
+    if (imageInputRef.current) {
+      imageInputRef.current.value = '';
+    }
+  }
+
+  function handleImageFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    if (!file) {
+      clearImageSelection();
       return;
     }
 
-    const snapshot = { text, contextType };
+    if (!file.type.startsWith('image/')) {
+      clearImageSelection();
+      setImageError('이미지 파일만 업로드할 수 있습니다.');
+      return;
+    }
+
+    setImageError(null);
+    setSelectedImageFile(file);
+  }
+
+  async function handleAnalyzeClick() {
+    if (!text.trim() && !selectedImageFile) {
+      return;
+    }
+
+    const snapshot: PendingAnalysis = selectedImageFile
+      ? { inputMode: 'image', contextType, imageFile: selectedImageFile }
+      : { inputMode: 'text', contextType, text };
     setPendingKeyword(null);
 
     if (session) {
@@ -1024,8 +1361,13 @@ export default function App() {
       return;
     }
 
+    if (canUseGuest) {
+      await runAnalysis(snapshot, null);
+      return;
+    }
+
     setPendingAnalysis(snapshot);
-    openLoginPage(canUseGuest ? undefined : '게스트 무료 3회를 모두 사용했습니다. 로그인 또는 회원가입이 필요합니다.');
+    openLoginPage('비로그인 분석은 IP 기준 하루 10회 제한입니다. 로그인 또는 회원가입이 필요합니다.');
   }
 
   async function handleKeywordVerifyClick() {
@@ -1042,8 +1384,13 @@ export default function App() {
       return;
     }
 
+    if (canUseGuest) {
+      await runKeywordVerify(snapshot, null);
+      return;
+    }
+
     setPendingKeyword(snapshot);
-    openLoginPage(canUseGuest ? undefined : '게스트 무료 3회를 모두 사용했습니다. 로그인 또는 회원가입이 필요합니다.');
+    openLoginPage('비로그인 검증은 IP 기준 하루 10회 제한입니다. 로그인 또는 회원가입이 필요합니다.');
   }
 
   async function handleLoginPageSubmit(event: FormEvent<HTMLFormElement>) {
@@ -1091,9 +1438,12 @@ export default function App() {
   }
 
   function handleReset() {
+    closeAnalysisStream();
     setText('');
+    clearImageSelection();
     setResult(null);
     setAgentProgress([]);
+    setActiveAgentId(null);
     setAnalysisError(null);
     setSelectedDetail(null);
     setKeywordResult(null);
@@ -1231,7 +1581,7 @@ export default function App() {
       {!session ? (
         <>
           <span className={`guest-pill ${guestSession.guestRemaining > 0 ? 'guest-pill-ready' : 'guest-pill-empty'}`}>
-            게스트 {guestSession.guestRemaining}/3
+            비로그인 잔여 {guestSession.guestRemaining}/10
           </span>
           <button className="auth-btn auth-btn-ghost" onClick={() => openLoginPage()} type="button">
             로그인
@@ -1277,7 +1627,7 @@ export default function App() {
               onClick={() => setContextType(opt.value)}
               type="button"
             >
-              <span className="context-icon">{opt.icon}</span>
+              <ContextIcon name={opt.icon} />
               <span className="context-label">{opt.label}</span>
               <span className="context-desc">{opt.desc}</span>
             </button>
@@ -1296,10 +1646,56 @@ export default function App() {
         />
         <div className="char-count">{text.length}자</div>
 
+        <div className="section-label" style={{ marginTop: '24px' }}>
+          이미지 업로드
+        </div>
+        <div className="image-upload-block">
+          <input
+            ref={imageInputRef}
+            id="case-image-upload"
+            type="file"
+            accept="image/*"
+            onChange={handleImageFileChange}
+            className="image-upload-input"
+          />
+          <label className="image-upload-label" htmlFor="case-image-upload">
+            <span className="image-upload-icon">
+              <AttachmentIcon />
+            </span>
+            <span className="image-upload-copy">
+              <strong>대화 캡처 이미지 선택</strong>
+              <span>PNG, JPG 등 이미지 파일을 OCR 분석 경로로 전송합니다.</span>
+            </span>
+          </label>
+          <p className="keyword-note" style={{ marginTop: 0 }}>
+            이미지를 선택하면 OCR 분석 경로로 전송됩니다. 텍스트가 입력되어 있어도 이미지 모드가 우선됩니다.
+          </p>
+          {selectedImageFile && (
+            <div className="image-file-card">
+              <div>
+                <strong>{selectedImageFile.name}</strong>
+                <span>
+                  {(selectedImageFile.size / (1024 * 1024)).toFixed(2)} MB ·{' '}
+                  {selectedImageFile.type || 'image/*'}
+                </span>
+              </div>
+              <button className="auth-btn auth-btn-ghost" type="button" onClick={clearImageSelection}>
+                파일 제거
+              </button>
+            </div>
+          )}
+          {imageError && <div className="error-banner">{imageError}</div>}
+        </div>
+
         {analysisError && <div className="error-banner">{analysisError}</div>}
 
-        <button className="analyze-btn" onClick={() => void handleAnalyzeClick()} disabled={!text.trim()} type="button">
-          법적 분석 시작
+        <button
+          className="analyze-btn"
+          onClick={() => void handleAnalyzeClick()}
+          disabled={!text.trim() && !selectedImageFile}
+          type="button"
+        >
+          {selectedImageFile ? '이미지 업로드 분석 시작' : '법적 분석 시작'}
           <span className="analyze-arrow">→</span>
         </button>
 
@@ -1328,21 +1724,21 @@ export default function App() {
               {keywordLoading ? '검증 중...' : '검증'}
             </button>
           </div>
-          <p className="keyword-note">
-            짧은 키워드를 넣으면 관련 법령과 판례를 빠르게 확인합니다. 비로그인 상태는 기존 분석과
-            같은 3회 게스트 제한을 따릅니다.
-          </p>
+            <p className="keyword-note">
+              짧은 키워드를 넣으면 관련 법령과 판례를 빠르게 확인합니다. 비로그인 상태는 IP 기준
+              하루 10회 제한을 따릅니다.
+            </p>
           {keywordError && <div className="error-banner">{keywordError}</div>}
         </div>
 
         <p className="guest-note">
-          비로그인 상태에서는 게스트로 총 3회까지 사용할 수 있습니다. 남은 횟수는 우측 상단에서
-          확인할 수 있습니다.
+          비로그인 상태에서는 IP 기준으로 하루 10회까지 사용할 수 있습니다. 남은 횟수는 우측
+          상단에서 확인할 수 있습니다.
         </p>
-
         <p className="input-disclaimer">
-          업로드된 내용은 분석 후 즉시 삭제되며 서버에 저장되지 않습니다. 본 서비스는
-          법률 정보 제공 목적이며 법적 효력이 없습니다.
+          업로드된 이미지는 분석 후 저장하지 않으며 OCR 결과의 연락처·주소 등 식별 정보는 마스킹
+          처리됩니다. 비로그인 사용은 IP 기준 일일 제한이 적용되고, 본 서비스는 법률 정보 제공 목적이며
+          법적 효력이 없습니다.
         </p>
       </div>
 
@@ -1436,9 +1832,23 @@ export default function App() {
             </div>
           </div>
 
-          <div className="keyword-detail-shell">
+          <div className="keyword-detail-shell" ref={keywordDetailPanelRef}>
             {selectedKeywordDetail ? (
               <div className="detail-panel-body detail-panel-body-inline">
+                <div className="detail-panel-toolbar">
+                  <span className="detail-panel-count">
+                    {selectedKeywordDetail.references.length > 0
+                      ? `${selectedKeywordDetail.references.length}개 근거`
+                      : '선택한 근거'}
+                  </span>
+                  <button
+                    className="detail-close-btn"
+                    type="button"
+                    onClick={() => setSelectedKeywordDetail(null)}
+                  >
+                    닫기
+                  </button>
+                </div>
                 <div className="detail-panel-kicker">{selectedKeywordDetail.eyebrow}</div>
                 <h4 className="detail-panel-title">{selectedKeywordDetail.title}</h4>
                 <p className="detail-panel-summary">{selectedKeywordDetail.summary}</p>
@@ -1538,12 +1948,16 @@ export default function App() {
       <div className="analyzing-card">
         <div className="spinner" />
         <h2 className="analyzing-title">분석 중입니다</h2>
-        <p className="analyzing-sub">법령과 판례 데이터베이스를 조회하고 있습니다</p>
+        <p className="analyzing-sub">
+          {RUNTIME_IS_LIVE
+            ? '법령과 판례 provider를 조회하고 있습니다.'
+            : '로컬 fixture 기반 mock 검색이라 실제 API보다 빠르게 완료될 수 있습니다.'}
+        </p>
 
         <div className="pipeline">
-          {AGENT_STEPS.map((step, i) => {
+          {AGENT_STEPS.map((step) => {
             const done = agentProgress.includes(step.id);
-            const active = agentProgress.length === i;
+            const active = !done && activeAgentId === step.id;
             return (
               <div
                 key={step.id}
@@ -1752,7 +2166,7 @@ export default function App() {
         </div>
 
         <div className="results-col results-col-side">
-          <section className="result-section result-detail-panel">
+          <section className="result-section result-detail-panel" ref={detailPanelRef}>
             <div className="detail-panel-head">
               <div>
                 <h3 className="section-title">상세 보기</h3>
@@ -1761,11 +2175,16 @@ export default function App() {
                 </p>
               </div>
               {selectedDetail && (
-                <span className="detail-panel-count">
-                  {selectedDetail.references.length > 0
-                    ? `${selectedDetail.references.length}개 근거`
-                    : '카드 상세'}
-                </span>
+                <div className="detail-panel-actions">
+                  <span className="detail-panel-count">
+                    {selectedDetail.references.length > 0
+                      ? `${selectedDetail.references.length}개 근거`
+                      : '카드 상세'}
+                  </span>
+                  <button className="detail-close-btn" type="button" onClick={() => setSelectedDetail(null)}>
+                    닫기
+                  </button>
+                </div>
               )}
             </div>
 
@@ -1859,7 +2278,9 @@ export default function App() {
               <div className="evidence-list">
                 {result.evidence_to_collect.map((ev, i) => (
                   <div key={i} className="evidence-item">
-                    <span className="evidence-icon">📎</span>
+                    <span className="evidence-icon">
+                      <AttachmentIcon />
+                    </span>
                     {ev}
                   </div>
                 ))}
@@ -1868,7 +2289,9 @@ export default function App() {
           )}
 
           <div className="disclaimer-box">
-            <span className="disclaimer-icon">ⓘ</span>
+            <span className="disclaimer-icon">
+              <InfoIcon />
+            </span>
             <p>{result.disclaimer}</p>
           </div>
         </div>
@@ -1886,7 +2309,9 @@ export default function App() {
     <div className="signup-page">
       <div className="signup-container">
         <div className="signup-logo">
-          <span className="signup-logo-icon">⚖</span>
+          <span className="signup-logo-icon">
+            <ScaleIcon />
+          </span>
           <span className="signup-logo-text">KoreanLaw</span>
         </div>
 
@@ -2065,13 +2490,20 @@ export default function App() {
     <div className="signup-page">
       <div className="signup-container">
         <div className="signup-logo">
-          <span className="signup-logo-icon">⚖</span>
+          <span className="signup-logo-icon">
+            <ScaleIcon />
+          </span>
           <span className="signup-logo-text">KoreanLaw</span>
         </div>
 
         {pendingAnalysis && (
           <div className="auth-page-notice">
             로그인 후 분석이 자동으로 시작됩니다
+          </div>
+        )}
+        {pendingKeyword && (
+          <div className="auth-page-notice">
+            로그인 후 키워드 검증이 자동으로 시작됩니다
           </div>
         )}
 
@@ -2117,13 +2549,13 @@ export default function App() {
             {authBusy ? '처리 중...' : '로그인'}
           </button>
 
-          {pendingAnalysis && canUseGuest && (
+          {(pendingAnalysis || pendingKeyword) && canUseGuest && (
             <button
               className="signup-submit auth-guest-btn"
               type="button"
               onClick={() => void handleGuestContinue()}
             >
-              게스트로 계속 ({guestSession.guestRemaining}회 남음)
+              비로그인으로 계속 ({guestSession.guestRemaining}회 남음)
             </button>
           )}
         </form>
@@ -2149,7 +2581,9 @@ export default function App() {
     <div className="page">
       <header className="top-bar">
         <div className="logo">
-          <span className="logo-icon">⚖</span>
+          <span className="logo-icon">
+            <ScaleIcon />
+          </span>
           <span className="logo-text">KoreanLaw</span>
         </div>
         <span className="top-bar-sub">AI 법률 분석 서비스</span>
