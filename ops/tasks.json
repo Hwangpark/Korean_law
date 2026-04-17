@@ -42,14 +42,28 @@
     {
       "id": "orch-004",
       "title": "Add task brief generator for sub-agent handoff",
+      "status": "completed",
+      "owner_role": "orchestrator",
+      "files": [
+        "scripts/orchestrator/build-brief.ts",
+        "package.json",
+        "ops/tasks.json"
+      ],
+      "validation": ["npm run orch:brief -- --json", "npm run orch:validate", "npm run typecheck"],
+      "notes": "Reusable handoff briefs now include file ownership, role guardrails, and suggested validation commands."
+    },
+    {
+      "id": "orch-005",
+      "title": "Add claim and status update automation",
       "status": "pending",
       "owner_role": "orchestrator",
       "files": [
-        "docs/codex-orchestration.md",
+        "scripts/orchestrator/claim-task.ts",
+        "scripts/orchestrator/update-task.ts",
         "ops/tasks.json"
       ],
-      "validation": ["npm run orch:validate"],
-      "notes": "Next step: emit reusable handoff briefs for planner, builders, verifier, and reviewer."
+      "validation": ["npm run orch:validate", "npm run typecheck"],
+      "notes": "Allow orchestrator flows to claim tasks and move them through pending/in_progress/completed safely."
     }
   ]
 }

@@ -77,6 +77,12 @@
 5. `Review`: reviewer가 경계 위반과 누락 테스트를 본다.
 6. `Integrate`: orchestrator가 충돌 없이 합치고 커밋한다.
 
+현재 자동화 보조 명령:
+
+- `npm run orch:next -- --json` : 다음 pending task를 machine-readable 형식으로 조회
+- `npm run orch:brief -- --task <id>` : sub-agent handoff용 brief 생성
+- `npm run orch:validate` : task/role 정의와 파일 범위 경고 검사
+
 ## 검증 게이트
 
 작업 종류별 최소 검증은 아래를 따른다.
