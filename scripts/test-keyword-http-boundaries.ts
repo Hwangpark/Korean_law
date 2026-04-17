@@ -253,6 +253,85 @@ function assertStoredBoundary(stored: Record<string, unknown>, internal: Keyword
   );
 }
 
+function assertStoredProjectionSanitizesPreviewBoundary(internal: KeywordVerificationResponse): void {
+  const stored = buildStoredKeywordVerificationResponse({
+    ...internal,
+    retrieval_preview: {
+      law: {
+        ...(internal.retrieval_preview?.law ?? {
+          headline: "law",
+          top_issues: [],
+          top_laws: [],
+          top_precedents: [],
+          profile_flags: [],
+          disclaimer: ""
+        }),
+        top_laws: [
+          {
+            id: "law-preview",
+            title: "형법 제307조",
+            summary: "명예훼손",
+            reference: { secret: true }
+          } as Record<string, unknown>
+        ]
+      },
+      precedent: {
+        ...(internal.retrieval_preview?.precedent ?? {
+          headline: "precedent",
+          top_issues: [],
+          top_laws: [],
+          top_precedents: [],
+          profile_flags: [],
+          disclaimer: ""
+        }),
+        top_precedents: [
+          {
+            id: "precedent-preview",
+            title: "대법원 2024도1",
+            summary: "판례",
+            citation_map: { leaked: true }
+          } as Record<string, unknown>
+        ]
+      }
+    }
+  });
+
+  assert.deepEqual(
+    stored.retrieval_preview,
+    {
+      law: {
+        headline: (internal.retrieval_preview?.law?.headline ?? "law"),
+        top_issues: internal.retrieval_preview?.law?.top_issues ?? [],
+        top_laws: [
+          {
+            id: "law-preview",
+            title: "형법 제307조",
+            summary: "명예훼손"
+          }
+        ],
+        top_precedents: internal.retrieval_preview?.law?.top_precedents ?? [],
+        profile_flags: internal.retrieval_preview?.law?.profile_flags ?? [],
+        disclaimer: internal.retrieval_preview?.law?.disclaimer ?? ""
+      },
+      precedent: {
+        headline: (internal.retrieval_preview?.precedent?.headline ?? "precedent"),
+        top_issues: internal.retrieval_preview?.precedent?.top_issues ?? [],
+        top_laws: internal.retrieval_preview?.precedent?.top_laws ?? [],
+        top_precedents: [
+          {
+            id: "precedent-preview",
+            title: "대법원 2024도1",
+            summary: "판례"
+          }
+        ],
+        profile_flags: internal.retrieval_preview?.precedent?.profile_flags ?? [],
+        disclaimer: internal.retrieval_preview?.precedent?.disclaimer ?? ""
+      }
+    },
+    "stored retrieval_preview should drop future provenance/reference payload additions"
+  );
+}
+
 function assertPublicBoundary(publicBody: Record<string, unknown>, internal: KeywordVerificationResponse): void {
   const { guest_id, guest_remaining, ...publicProjection } = publicBody;
 
@@ -293,6 +372,14 @@ function assertPublicBoundary(publicBody: Record<string, unknown>, internal: Key
     : null;
   assert.ok(matchedLaw, "public keyword response should keep matched law cards");
   assert.equal("reference" in matchedLaw, false, "matched law card must not embed ReferenceLibraryItem");
+  assert.ok(Array.isArray(matchedLaw.matchedQueries), "matched law card should keep legacy matchedQueries text list");
+  assert.ok(Array.isArray(matchedLaw.matchedQueryRefs), "matched law card should expose structured matchedQueryRefs");
+  assert.ok((matchedLaw.matchedQueryRefs as Array<unknown>).length > 0, "matched law card should expose at least one matched query ref");
+  assert.deepEqual(
+    Object.keys((matchedLaw.matchedQueryRefs as Array<Record<string, unknown>>)[0] ?? {}).sort(),
+    ["bucket", "channel", "issue_types", "legal_element_signals", "sources", "text"].sort(),
+    "public matchedQueryRefs should keep only the safe provenance fields"
+  );
 
   const legalAnalysis = publicBody.legal_analysis as Record<string, unknown>;
   assert.ok(legalAnalysis, "public keyword response should keep legal_analysis");
@@ -306,6 +393,40 @@ function assertPublicBoundary(publicBody: Record<string, unknown>, internal: Key
       evidence_strength: internal.legal_analysis.grounding_evidence?.evidence_strength ?? "low"
     },
     "public keyword legal_analysis should keep only coarse grounding evidence summary"
+  );
+
+  const publicCharges = Array.isArray(legalAnalysis.charges)
+    ? legalAnalysis.charges as Array<Record<string, unknown>>
+    : [];
+  assert.ok(publicCharges[0]?.grounding, "public keyword legal_analysis should retain charge grounding");
+  assert.equal(
+    (publicCharges[0]?.grounding as Record<string, unknown>)?.citation_id,
+    internal.legal_analysis.charges[0]?.grounding?.citation_id ?? "",
+    "public keyword legal_analysis should retain charge citation ids"
+  );
+
+  const publicPrecedents = Array.isArray(legalAnalysis.precedent_cards)
+    ? legalAnalysis.precedent_cards as Array<Record<string, unknown>>
+    : [];
+  assert.ok(publicPrecedents[0]?.grounding, "public keyword legal_analysis should retain precedent grounding");
+  assert.equal(
+    (publicPrecedents[0]?.grounding as Record<string, unknown>)?.citation_id,
+    internal.legal_analysis.precedent_cards[0]?.grounding?.citation_id ?? "",
+    "public keyword legal_analysis should retain precedent citation ids"
+  );
+
+  const citationMap = legalAnalysis.citation_map as Record<string, unknown>;
+  assert.ok(citationMap, "public keyword legal_analysis should retain citation_map");
+  assert.equal(citationMap.version, internal.legal_analysis.citation_map?.version ?? "", "public keyword legal_analysis should retain citation_map version");
+  assert.deepEqual(
+    (citationMap.by_statement_path as Record<string, unknown>)?.["legal_analysis.summary"],
+    internal.legal_analysis.citation_map?.by_statement_path?.["legal_analysis.summary"] ?? [],
+    "public keyword legal_analysis should retain summary citation path indexing"
+  );
+  assert.deepEqual(
+    (citationMap.by_statement_path as Record<string, unknown>)?.["legal_analysis.issue_cards[0]"],
+    internal.legal_analysis.citation_map?.by_statement_path?.["legal_analysis.issue_cards[0]"] ?? [],
+    "public keyword legal_analysis should retain issue card citation path indexing"
   );
 }
 
@@ -447,6 +568,7 @@ async function main(): Promise<void> {
   });
 
   assertStoredBoundary(buildStoredKeywordVerificationResponse(internal), internal);
+  assertStoredProjectionSanitizesPreviewBoundary(internal);
 
   const handler = createKeywordVerificationHandler(
     authService,

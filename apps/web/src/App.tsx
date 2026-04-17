@@ -48,6 +48,7 @@ type Charge = {
   elements_met: string[];
   probability: 'high' | 'medium' | 'low';
   expected_penalty: string;
+  grounding?: DetailGrounding | null;
   reference_library?: AnalysisReferenceItem[];
   referenceLibrary?: AnalysisReferenceItem[];
   references?: AnalysisReferenceItem[];
@@ -60,6 +61,7 @@ type PrecedentCard = {
   verdict: string;
   summary: string;
   similarity_score: number;
+  grounding?: DetailGrounding | null;
   reference_library?: AnalysisReferenceItem[];
   referenceLibrary?: AnalysisReferenceItem[];
   references?: AnalysisReferenceItem[];
@@ -142,6 +144,28 @@ type DetailReference = {
   subtitle?: string;
 };
 
+type DetailQueryRef = {
+  text: string;
+  bucket?: string;
+  channel?: string;
+  sources: string[];
+  issueTypes: string[];
+  legalElementSignals: string[];
+};
+
+type DetailGrounding = {
+  citationId?: string;
+  lawReferenceId?: string;
+  precedentReferenceIds: string[];
+  referenceId?: string;
+  referenceKey?: string;
+  matchReason?: string;
+  snippetField?: string;
+  snippetText?: string;
+  evidenceCount?: number;
+  queryRefs: DetailQueryRef[];
+};
+
 type DetailPanelData = {
   eyebrow: string;
   title: string;
@@ -149,6 +173,7 @@ type DetailPanelData = {
   metadata: Array<{ label: string; value: string }>;
   highlights: string[];
   references: DetailReference[];
+  provenance?: DetailGrounding | null;
 };
 
 function normalizeProfileContext(value: unknown): UserProfileContext | null {
@@ -463,6 +488,73 @@ function toTextList(value: unknown): string[] {
     .filter((item) => item.length > 0);
 }
 
+function normalizeQueryRefs(value: unknown): DetailQueryRef[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.reduce<DetailQueryRef[]>((items, item) => {
+    if (!isRecord(item)) {
+      return items;
+    }
+
+    const text = getText(item.text);
+    if (!text) {
+      return items;
+    }
+
+    items.push({
+      text,
+      bucket: firstText(item.bucket) || undefined,
+      channel: firstText(item.channel) || undefined,
+      sources: toTextList(item.sources),
+      issueTypes: toTextList(item.issue_types ?? item.issueTypes),
+      legalElementSignals: toTextList(item.legal_element_signals ?? item.legalElementSignals),
+    });
+    return items;
+  }, []);
+}
+
+function normalizeGrounding(value: unknown): DetailGrounding | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const snippet = isRecord(value.snippet) ? value.snippet : {};
+  const evidenceCount = typeof value.evidence_count === 'number'
+    ? value.evidence_count
+    : typeof value.evidenceCount === 'number'
+      ? value.evidenceCount
+      : undefined;
+  const grounding: DetailGrounding = {
+    citationId: firstText(value.citation_id, value.citationId),
+    lawReferenceId: firstText(value.law_reference_id, value.lawReferenceId),
+    precedentReferenceIds: toTextList(value.precedent_reference_ids ?? value.precedentReferenceIds),
+    referenceId: firstText(value.reference_id, value.referenceId),
+    referenceKey: firstText(value.reference_key, value.referenceKey),
+    matchReason: firstText(value.match_reason, value.matchReason),
+    snippetField: firstText(snippet.field),
+    snippetText: firstText(snippet.text),
+    evidenceCount,
+    queryRefs: normalizeQueryRefs(value.query_refs ?? value.queryRefs),
+  };
+
+  if (
+    !grounding.citationId &&
+    !grounding.lawReferenceId &&
+    grounding.precedentReferenceIds.length === 0 &&
+    !grounding.referenceId &&
+    !grounding.referenceKey &&
+    !grounding.matchReason &&
+    !grounding.snippetText &&
+    grounding.queryRefs.length === 0
+  ) {
+    return null;
+  }
+
+  return grounding;
+}
+
 function normalizeReferenceItem(value: unknown): DetailReference | null {
   if (typeof value === 'string') {
     return {
@@ -570,6 +662,7 @@ function buildDetailPanelData(
   metadata: Array<{ label: string; value: string }>,
   highlights: string[],
   referenceSource: unknown,
+  provenance?: DetailGrounding | null,
 ): DetailPanelData {
   return {
     eyebrow,
@@ -578,6 +671,7 @@ function buildDetailPanelData(
     metadata,
     highlights,
     references: collectReferenceItems(referenceSource),
+    provenance: provenance ?? null,
   };
 }
 
@@ -597,6 +691,7 @@ function buildChargeDetail(charge: Charge, index: number): DetailPanelData {
       referenceLibrary: charge.referenceLibrary,
       references: charge.references,
     },
+    charge.grounding ?? normalizeGrounding(charge.grounding),
   );
 }
 
@@ -622,6 +717,7 @@ function buildPrecedentDetail(precedent: PrecedentCard, index: number): DetailPa
       referenceLibrary: precedent.referenceLibrary,
       references: precedent.references,
     },
+    precedent.grounding ?? normalizeGrounding(precedent.grounding),
   );
 }
 
@@ -736,6 +832,7 @@ function normalizeAnalysisResult(
               ? charge.probability
               : 'low',
           expected_penalty: getText(charge.expected_penalty) || '추가 조회 필요',
+          grounding: normalizeGrounding(charge.grounding),
           reference_library: (() => {
             const local = collectReferenceItems(charge.reference_library ?? charge.referenceLibrary ?? charge.references);
             return local.length > 0 ? local : fallbackReferences;
@@ -768,6 +865,7 @@ function normalizeAnalysisResult(
               typeof precedent.similarity_score === 'number' && !Number.isNaN(precedent.similarity_score)
                 ? precedent.similarity_score
                 : 0,
+            grounding: normalizeGrounding(precedent.grounding),
           };
 
           return {
@@ -2213,6 +2311,76 @@ export default function App() {
                         <span>{item}</span>
                       </div>
                     ))}
+                  </div>
+                )}
+
+                {selectedDetail.provenance && (
+                  <div className="detail-provenance">
+                    <div className="detail-provenance-head">
+                      <strong>근거 연결</strong>
+                      {selectedDetail.provenance.citationId && (
+                        <span>{selectedDetail.provenance.citationId}</span>
+                      )}
+                    </div>
+
+                    {(selectedDetail.provenance.referenceKey ||
+                      selectedDetail.provenance.lawReferenceId ||
+                      selectedDetail.provenance.referenceId ||
+                      selectedDetail.provenance.precedentReferenceIds.length > 0) && (
+                      <div className="detail-provenance-grid">
+                        {selectedDetail.provenance.referenceKey && (
+                          <div>
+                            <span>참조 키</span>
+                            <strong>{selectedDetail.provenance.referenceKey}</strong>
+                          </div>
+                        )}
+                        {selectedDetail.provenance.lawReferenceId && (
+                          <div>
+                            <span>법령 근거</span>
+                            <strong>{selectedDetail.provenance.lawReferenceId}</strong>
+                          </div>
+                        )}
+                        {selectedDetail.provenance.referenceId && (
+                          <div>
+                            <span>판례 근거</span>
+                            <strong>{selectedDetail.provenance.referenceId}</strong>
+                          </div>
+                        )}
+                        {selectedDetail.provenance.precedentReferenceIds.length > 0 && (
+                          <div>
+                            <span>연결 판례</span>
+                            <strong>{selectedDetail.provenance.precedentReferenceIds.join(', ')}</strong>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {selectedDetail.provenance.matchReason && (
+                      <p className="detail-provenance-reason">{selectedDetail.provenance.matchReason}</p>
+                    )}
+
+                    {selectedDetail.provenance.snippetText && (
+                      <blockquote className="detail-provenance-snippet">
+                        {selectedDetail.provenance.snippetField && (
+                          <span>{selectedDetail.provenance.snippetField}</span>
+                        )}
+                        {selectedDetail.provenance.snippetText}
+                      </blockquote>
+                    )}
+
+                    {selectedDetail.provenance.queryRefs.length > 0 && (
+                      <div className="detail-query-list">
+                        {selectedDetail.provenance.queryRefs.slice(0, 8).map((query, queryIndex) => (
+                          <span
+                            key={`${query.text}-${query.bucket}-${query.channel}-${queryIndex}`}
+                            className="detail-query-chip"
+                            title={[...query.sources, ...query.issueTypes, ...query.legalElementSignals].join(', ')}
+                          >
+                            {query.text}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 
