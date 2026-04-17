@@ -201,8 +201,32 @@ function buildIssueCards(charges) {
     probability: charge.probability,
     expected_penalty: charge.expected_penalty,
     checklist: charge.elements_met,
-    supporting_precedents: charge.supporting_precedents
+    supporting_precedents: charge.supporting_precedents,
+    grounding: charge.grounding
   }));
+}
+
+function buildSummaryGrounding(charges) {
+  const topGrounding = charges[0]?.grounding;
+  if (!topGrounding) {
+    return null;
+  }
+
+  return {
+    law_reference_id: topGrounding.law_reference_id ?? null,
+    reference_key: topGrounding.reference_key ?? null,
+    citation_id: topGrounding.citation_id ?? null,
+    precedent_reference_ids: Array.isArray(topGrounding.precedent_reference_ids)
+      ? topGrounding.precedent_reference_ids
+      : [],
+    precedent_citation_ids: Array.isArray(topGrounding.precedent_citation_ids)
+      ? topGrounding.precedent_citation_ids
+      : [],
+    evidence_count: Number(topGrounding.evidence_count ?? 0),
+    query_refs: Array.isArray(topGrounding.query_refs) ? topGrounding.query_refs : [],
+    match_reason: topGrounding.match_reason ?? "",
+    snippet: topGrounding.snippet ?? null
+  };
 }
 
 function buildPrecedentGrounding(precedent) {
@@ -559,6 +583,8 @@ export async function runLegalAnalysisAgent(
     ? "본 분석은 공식 법령·판례 API를 참고한 안내용 결과이며 법적 효력은 없습니다. 구체적 대응은 변호사 상담이 필요합니다."
     : "본 분석은 mock 데이터 기반 참고용 초안이며 법적 효력은 없습니다. 구체적 대응은 변호사 상담이 필요합니다.";
 
+  const summaryGrounding = buildSummaryGrounding(charges);
+
   return {
     mode: providerMode,
     can_sue: judgment.can_sue,
@@ -568,6 +594,7 @@ export async function runLegalAnalysisAgent(
     evidence_to_collect: judgment.evidence_to_collect,
     disclaimer,
     summary,
+    ...(summaryGrounding ? { summary_grounding: summaryGrounding } : {}),
     issue_cards: buildIssueCards(charges),
     precedent_cards: precedentCards,
     next_steps: judgment.recommended_actions,

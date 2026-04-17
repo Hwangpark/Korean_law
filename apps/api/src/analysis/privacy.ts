@@ -287,6 +287,21 @@ function sanitizeChargeList(value: unknown): Array<Record<string, unknown>> {
     .filter((item) => item.charge);
 }
 
+function sanitizeSharedGrounding(value: unknown): Record<string, unknown> {
+  const grounding = asRecord(value);
+  return {
+    law_reference_id: asString(grounding.law_reference_id),
+    reference_key: asString(grounding.reference_key),
+    citation_id: asString(grounding.citation_id),
+    precedent_reference_ids: sanitizeStringArray(grounding.precedent_reference_ids),
+    precedent_citation_ids: sanitizeStringArray(grounding.precedent_citation_ids),
+    evidence_count: asNumber(grounding.evidence_count),
+    query_refs: sanitizeQueryRefList(grounding.query_refs),
+    match_reason: asString(grounding.match_reason),
+    snippet: sanitizeEvidenceSnippet(grounding.snippet)
+  };
+}
+
 function sanitizeIssueCards(value: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) {
     return [];
@@ -300,7 +315,8 @@ function sanitizeIssueCards(value: unknown): Array<Record<string, unknown>> {
       probability: asString(item.probability),
       expected_penalty: asString(item.expected_penalty),
       checklist: sanitizeStringArray(item.checklist),
-      supporting_precedents: sanitizeStringArray(item.supporting_precedents)
+      supporting_precedents: sanitizeStringArray(item.supporting_precedents),
+      grounding: sanitizeSharedGrounding(item.grounding)
     }))
     .filter((item) => item.title);
 }
@@ -363,6 +379,7 @@ function sanitizePublicLegalAnalysis(value: unknown): Record<string, unknown> {
     can_sue: asBoolean(record.can_sue),
     risk_level: asNumber(record.risk_level, 0),
     summary: asString(record.summary, "분석 결과"),
+    summary_grounding: sanitizeSharedGrounding(record.summary_grounding),
     disclaimer: asString(record.disclaimer),
     charges: sanitizeChargeList(record.charges),
     recommended_actions: sanitizeStringArray(record.recommended_actions),

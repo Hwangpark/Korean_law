@@ -704,6 +704,33 @@ async function main() {
       },
       legal_analysis: {
         summary: "public summary",
+        summary_grounding: {
+          law_reference_id: "law:test",
+          reference_key: "law:test",
+          citation_id: "law-citation:test",
+          precedent_reference_ids: ["precedent:test"],
+          precedent_citation_ids: ["precedent-citation:test"],
+          evidence_count: 2,
+          query_refs: [{ text: "명예훼손", bucket: "precise", channel: "law" }],
+          match_reason: "요건이 직접 맞닿아 있습니다.",
+          snippet: { field: "content", text: "should not be public" }
+        },
+        issue_cards: [
+          {
+            title: "명예훼손",
+            grounding: {
+              law_reference_id: "law:test",
+              reference_key: "law:test",
+              citation_id: "law-citation:test",
+              precedent_reference_ids: ["precedent:test"],
+              precedent_citation_ids: ["precedent-citation:test"],
+              evidence_count: 2,
+              query_refs: [{ text: "명예훼손", bucket: "precise", channel: "law" }],
+              match_reason: "요건이 직접 맞닿아 있습니다.",
+              snippet: { field: "content", text: "should not be public" }
+            }
+          }
+        ],
         grounding_evidence: {
           top_issue: "명예훼손",
           evidence_strength: "high",
@@ -748,6 +775,36 @@ async function main() {
       evidence_strength: "high"
     },
     "public analysis response should expose only coarse grounding evidence summary"
+  );
+  assert.deepEqual(
+    publicResult.legal_analysis?.summary_grounding,
+    {
+      law_reference_id: "law:test",
+      reference_key: "law:test",
+      citation_id: "law-citation:test",
+      precedent_reference_ids: ["precedent:test"],
+      precedent_citation_ids: ["precedent-citation:test"],
+      evidence_count: 2,
+      query_refs: [{ text: "명예훼손", bucket: "precise", channel: "law", sources: [], issue_types: [], legal_element_signals: [] }],
+      match_reason: "요건이 직접 맞닿아 있습니다.",
+      snippet: { field: "content", text: "should not be public" }
+    },
+    "public analysis response should expose sanitized summary grounding"
+  );
+  assert.deepEqual(
+    publicResult.legal_analysis?.issue_cards?.[0]?.grounding,
+    {
+      law_reference_id: "law:test",
+      reference_key: "law:test",
+      citation_id: "law-citation:test",
+      precedent_reference_ids: ["precedent:test"],
+      precedent_citation_ids: ["precedent-citation:test"],
+      evidence_count: 2,
+      query_refs: [{ text: "명예훼손", bucket: "precise", channel: "law", sources: [], issue_types: [], legal_element_signals: [] }],
+      match_reason: "요건이 직접 맞닿아 있습니다.",
+      snippet: { field: "content", text: "should not be public" }
+    },
+    "public analysis response should expose sanitized issue card grounding"
   );
   assert.equal(publicResult.ocr?.source_type, "messenger", "public analysis response should expose minimal OCR metadata");
   assert.equal("raw_text" in (publicResult.ocr ?? {}), false, "public OCR payload must not expose raw_text");
