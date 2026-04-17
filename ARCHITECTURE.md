@@ -47,7 +47,16 @@
 
 ### 4.1 채택하는 중심 구조
 
-`raw input -> signal detection -> guided extraction -> Scope Filter -> retrieval -> evidence pack -> grounded analysis`
+상위 묶음으로는 아래 4개 계층을 중심 구조로 본다.
+
+- Case Understanding
+- Evidence Engine
+- Legal Decision Engine
+- Safety & Output Layer
+
+세부 흐름은 아래와 같다.
+
+`raw input -> signal detection -> guided extraction -> Scope Filter -> retrieval -> evidence pack -> grounded analysis -> safety gate`
 
 ### 4.2 버리는 구조
 
@@ -95,6 +104,36 @@
 - 필수 개념이다
 - 하지만 runtime top-level stage를 무조건 늘린다는 뜻은 아니다
 
+### 4.6 Guided Extraction은 가설 생성기다
+
+Guided Extraction은 facts, issue hypotheses, legal element 초안, query hint를 만든다.
+
+하지만 아래는 하지 않는다.
+
+- 최종 법적 결론 확정
+- 강한 추천 액션 확정
+- scope 최종 판정 단독 수행
+
+즉 Guided Extraction 결과는 후단 retrieval와 verifier가 검증할 가설이다.
+
+### 4.7 추천 액션은 독립 판단층이 필요하다
+
+최종 산출물은 분석 요약만으로 끝나면 안 된다.
+
+서비스는 아래를 같이 계산해야 한다.
+
+- 지금 할 수 있는 행동
+- 추가 확인 사실
+- 먼저 확보할 증거
+- 즉시 전문가 상담 필요 여부
+
+추천 액션은 grounded analysis와 같은 판단 축에서 계산한다.
+
+### 4.8 검증은 두 번 걸친다
+
+- pre-analysis verification: evidence sufficiency, citation integrity, contradiction check
+- pre-output safety gate: overclaim suppression, unsupported/procedural/low-confidence 표현 통제, 고위험 상담 권고 확인
+
 ## 5. 전체 흐름
 
 ```mermaid
@@ -108,8 +147,9 @@ flowchart TD
     F --> H["Precedent Search Agent"]
     G --> I["Evidence Rerank + Pack Builder"]
     H --> I
-    I --> J["Legal Analysis Agent"]
-    J --> K["UI Report + Disclaimer"]
+    I --> J["Legal Analysis Agent<br/>grounded analysis + action recommendation"]
+    J --> K["Safety Gate<br/>overclaim suppression + disclaimer"]
+    K --> L["UI Report"]
 ```
 
 ## 6. 설계 원칙
@@ -448,12 +488,15 @@ Scope Filter는 별도 logical 단계다.
 - classification + law + precedent + evidence pack 통합
 - grounded summary 생성
 - issue card / reference card 생성
+- action recommendation 생성
 - disclaimer 포함
 
 원칙:
 
 - 근거가 약하면 강한 결론을 내리지 않는다.
 - unsupported / procedural-heavy / insufficient-facts 입력은 한계를 명시한다.
+- action recommendation도 같은 판단 축에서 계산한다.
+- verifier와 safety gate 없이 강한 문장을 확정하지 않는다.
 
 ## 8. HTTP 계약
 
