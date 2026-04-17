@@ -139,6 +139,30 @@ function assertPackIsolation(response: KeywordVerificationResponse, pack: Concre
   assert.deepEqual(pack.reference_library, response.reference_library, "evidence pack should snapshot reference_library");
 }
 
+function assertLegalAnalysisCitationCoverage(response: KeywordVerificationResponse): void {
+  const citationMap = response.legal_analysis.citation_map;
+  assert.ok(citationMap, "legal_analysis should expose citation_map");
+  assert.equal(citationMap.version, "v2", "legal_analysis citation_map should keep v2 contract");
+
+  const summaryCitations = citationMap.citations.filter((citation) => citation.statement_path === "legal_analysis.summary");
+  assert.ok(summaryCitations.length > 0, "summary should retain at least one supporting citation");
+  assert.ok(
+    citationMap.by_statement_path["legal_analysis.summary"]?.length,
+    "citation_map should index legal_analysis.summary"
+  );
+
+  for (const [index, _card] of response.legal_analysis.charges.entries()) {
+    const statementPath = `legal_analysis.issue_cards[${index}]`;
+    const issueCardCitations = citationMap.citations.filter((citation) => citation.statement_path === statementPath);
+    assert.ok(issueCardCitations.length > 0, `issue card ${index} should retain supporting citations`);
+    assert.ok(
+      issueCardCitations.every((citation) => citation.statement_type === "issue_card"),
+      `issue card ${index} citations should be tagged as issue_card`
+    );
+    assert.ok(citationMap.by_statement_path[statementPath]?.length, `citation_map should index ${statementPath}`);
+  }
+}
+
 function assertEvidencePackContract(response: KeywordVerificationResponse): void {
   const pack = getRetrievalEvidencePack(response);
   assert.ok(pack, "expected KeywordVerificationResponse.retrieval_evidence_pack to exist.");
@@ -407,6 +431,7 @@ async function main(): Promise<void> {
 
   assertCurrentRetrievalPrecursors(response);
   assertEvidencePackContract(response);
+  assertLegalAnalysisCitationCoverage(response);
 
   process.stdout.write("Retrieval evidence pack checks passed.\n");
 }

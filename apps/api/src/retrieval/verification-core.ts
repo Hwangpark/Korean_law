@@ -168,6 +168,83 @@ function buildPrecedentGrounding(
   };
 }
 
+function indexCitations(citations: EvidenceCitation[], key: "reference_id" | "statement_path"): Record<string, string[]> {
+  return citations.reduce<Record<string, string[]>>((accumulator, citation) => {
+    const value = citation[key];
+    if (!value) {
+      return accumulator;
+    }
+    if (!accumulator[value]) {
+      accumulator[value] = [];
+    }
+    accumulator[value].push(citation.citation_id);
+    return accumulator;
+  }, {});
+}
+
+function buildDerivedCitationId(citation: EvidenceCitation, statementType: EvidenceCitation["statement_type"], statementPath: string): string {
+  return `${citation.citation_id}:${statementType}:${statementPath}`;
+}
+
+function buildLegalAnalysisCitationMap(
+  retrievalEvidencePack: KeywordVerificationResponse["retrieval_evidence_pack"],
+  charges: KeywordVerificationResponse["legal_analysis"]["charges"],
+  precedentCards: KeywordVerificationResponse["legal_analysis"]["precedent_cards"],
+  summary: string
+): KeywordVerificationResponse["legal_analysis"]["citation_map"] {
+  const baseCitations = Array.isArray(retrievalEvidencePack.citation_map?.citations)
+    ? retrievalEvidencePack.citation_map.citations
+    : [];
+  if (baseCitations.length === 0) {
+    return undefined;
+  }
+
+  const citationByReference = buildCitationByReference(retrievalEvidencePack);
+  const citations: EvidenceCitation[] = [...baseCitations];
+  const seenIds = new Set(baseCitations.map((citation) => citation.citation_id));
+  const addDerived = (
+    referenceKey: string | undefined,
+    statementType: EvidenceCitation["statement_type"],
+    statementPath: string
+  ) => {
+    if (!referenceKey) {
+      return;
+    }
+    const citation = citationByReference.get(referenceKey);
+    if (!citation) {
+      return;
+    }
+    const derivedCitationId = buildDerivedCitationId(citation, statementType, statementPath);
+    if (seenIds.has(derivedCitationId)) {
+      return;
+    }
+    citations.push({
+      ...citation,
+      citation_id: derivedCitationId,
+      statement_type: statementType,
+      statement_path: statementPath
+    });
+    seenIds.add(derivedCitationId);
+  };
+
+  charges.forEach((charge, index) => {
+    addDerived(charge.grounding?.law_reference_id, "issue_card", `legal_analysis.issue_cards[${index}]`);
+  });
+  precedentCards.forEach((_card, _index) => {
+    return;
+  });
+  if (summary && charges[0]?.grounding?.law_reference_id) {
+    addDerived(charges[0].grounding.law_reference_id, "summary", "legal_analysis.summary");
+  }
+
+  return {
+    version: "v2",
+    citations,
+    by_reference_id: indexCitations(citations, "reference_id"),
+    by_statement_path: indexCitations(citations, "statement_path")
+  };
+}
+
 export function buildVerificationCorePayload(input: VerificationCorePayloadInput): Pick<
   KeywordVerificationResponse,
   "query" | "plan" | "verification" | "retrieval_preview" | "retrieval_trace" | "retrieval_evidence_pack"
@@ -215,6 +292,24 @@ export function buildLegalAnalysisPayload(
     baseRiskLevel: input.riskLevel,
     profileContext: input.request.profileContext
   });
+  const precedent_cards = input.matchedPrecedents.map((item) => {
+    const citation = citationByReference.get(item.referenceKey);
+    return {
+      case_no: item.reference.caseNo ?? item.title,
+      court: item.reference.court ?? item.reference.subtitle,
+      verdict: item.reference.verdict ?? DEFAULT_PRECEDENT_VERDICT,
+      summary: item.matchReason,
+      similarity_score: item.confidenceScore,
+      reference_library: [item.reference],
+      grounding: buildPrecedentGrounding(item, citation)
+    };
+  });
+  const citation_map = buildLegalAnalysisCitationMap(
+    input.retrievalEvidencePack,
+    charges,
+    precedent_cards,
+    input.summary
+  );
 
   return {
     can_sue: judgment.can_sue,
@@ -227,19 +322,9 @@ export function buildLegalAnalysisPayload(
     recommended_actions: judgment.recommended_actions,
     evidence_to_collect: judgment.evidence_to_collect,
     decision_axis: judgment.decision_axis,
-    precedent_cards: input.matchedPrecedents.map((item) => {
-      const citation = citationByReference.get(item.referenceKey);
-      return {
-        case_no: item.reference.caseNo ?? item.title,
-        court: item.reference.court ?? item.reference.subtitle,
-        verdict: item.reference.verdict ?? DEFAULT_PRECEDENT_VERDICT,
-        summary: item.matchReason,
-        similarity_score: item.confidenceScore,
-        reference_library: [item.reference],
-        grounding: buildPrecedentGrounding(item, citation)
-      };
-    }),
+    precedent_cards,
     disclaimer: input.disclaimer,
+    citation_map,
     reference_library: input.allReferences,
     law_reference_library: input.matchedLaws.map((item) => item.reference),
     precedent_reference_library: input.matchedPrecedents.map((item) => item.reference),

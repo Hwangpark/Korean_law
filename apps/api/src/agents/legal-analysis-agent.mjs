@@ -292,20 +292,33 @@ function findCitation(lookup, grounding) {
   return null;
 }
 
-function addRemappedCitation(citations, seenIds, citation, statementType, statementPath) {
-  if (!citation || seenIds.has(citation.citation_id)) {
+function buildDerivedCitationId(citation, statementType, statementPath) {
+  return `${citation.citation_id}:${statementType}:${statementPath}`;
+}
+
+function addRemappedCitation(citations, seenIds, citation, statementType, statementPath, options = {}) {
+  if (!citation) {
+    return;
+  }
+
+  const useDerivedId = options.useDerivedId === true;
+  const nextCitationId = useDerivedId
+    ? buildDerivedCitationId(citation, statementType, statementPath)
+    : citation.citation_id;
+  if (seenIds.has(nextCitationId)) {
     return;
   }
 
   citations.push({
     ...citation,
+    citation_id: nextCitationId,
     statement_type: statementType,
     statement_path: statementPath
   });
-  seenIds.add(citation.citation_id);
+  seenIds.add(nextCitationId);
 }
 
-function buildAnalysisCitationMap(originalCitationMap, charges, precedentCards, evidencePack) {
+function buildAnalysisCitationMap(originalCitationMap, summary, charges, precedentCards, evidencePack) {
   const originalCitations = Array.isArray(originalCitationMap?.citations)
     ? originalCitationMap.citations
     : [];
@@ -318,14 +331,34 @@ function buildAnalysisCitationMap(originalCitationMap, charges, precedentCards, 
   const seenIds = new Set();
 
   charges.forEach((charge, index) => {
+    const citation = findCitation(lookup, charge?.grounding);
     addRemappedCitation(
       citations,
       seenIds,
-      findCitation(lookup, charge?.grounding),
+      citation,
       "charge",
       `legal_analysis.charges[${index}]`
     );
+    addRemappedCitation(
+      citations,
+      seenIds,
+      citation,
+      "issue_card",
+      `legal_analysis.issue_cards[${index}]`,
+      { useDerivedId: true }
+    );
   });
+
+  if (summary && charges[0]?.grounding) {
+    addRemappedCitation(
+      citations,
+      seenIds,
+      findCitation(lookup, charges[0].grounding),
+      "summary",
+      "legal_analysis.summary",
+      { useDerivedId: true }
+    );
+  }
 
   precedentCards.forEach((card, index) => {
     addRemappedCitation(
@@ -343,7 +376,8 @@ function buildAnalysisCitationMap(originalCitationMap, charges, precedentCards, 
       seenIds,
       findCitation(lookup, law),
       "grounding_evidence",
-      `legal_analysis.grounding_evidence.laws[${index}]`
+      `legal_analysis.grounding_evidence.laws[${index}]`,
+      { useDerivedId: true }
     );
   });
 
@@ -353,7 +387,8 @@ function buildAnalysisCitationMap(originalCitationMap, charges, precedentCards, 
       seenIds,
       findCitation(lookup, precedent),
       "grounding_evidence",
-      `legal_analysis.grounding_evidence.precedents[${index}]`
+      `legal_analysis.grounding_evidence.precedents[${index}]`,
+      { useDerivedId: true }
     );
   });
 
@@ -363,7 +398,8 @@ function buildAnalysisCitationMap(originalCitationMap, charges, precedentCards, 
       seenIds,
       citation,
       "grounding_evidence",
-      "legal_analysis.grounding_evidence"
+      "legal_analysis.grounding_evidence",
+      { useDerivedId: true }
     );
   });
 
@@ -495,8 +531,10 @@ export async function runLegalAnalysisAgent(
     );
   const charges = buildCharges(classificationResult, retrievalPlan, evidencePack, scopeAssessment);
   const precedentCards = buildPrecedentCards(evidencePack);
+  const summary = buildSummary(issueCandidates, charges, evidencePack, scopeAssessment, facts);
   const citationMap = buildAnalysisCitationMap(
     options.retrievalEvidencePack?.citation_map,
+    summary,
     charges,
     precedentCards,
     evidencePack
@@ -520,7 +558,6 @@ export async function runLegalAnalysisAgent(
   const disclaimer = providerMode === "live"
     ? "본 분석은 공식 법령·판례 API를 참고한 안내용 결과이며 법적 효력은 없습니다. 구체적 대응은 변호사 상담이 필요합니다."
     : "본 분석은 mock 데이터 기반 참고용 초안이며 법적 효력은 없습니다. 구체적 대응은 변호사 상담이 필요합니다.";
-  const summary = buildSummary(issueCandidates, charges, evidencePack, scopeAssessment, facts);
 
   return {
     mode: providerMode,

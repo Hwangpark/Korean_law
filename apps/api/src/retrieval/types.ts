@@ -83,7 +83,7 @@ export interface EvidenceCitation {
   reference_id: string;
   reference_key: string;
   kind: "law" | "precedent";
-  statement_type: "charge" | "precedent_card" | "grounding_evidence";
+  statement_type: "summary" | "charge" | "issue_card" | "precedent_card" | "grounding_evidence";
   statement_path: string;
   title: string;
   confidence_score: number;
@@ -420,6 +420,7 @@ export interface KeywordVerificationResponse {
       };
     }>;
     disclaimer: string;
+    citation_map?: EvidenceCitationMap;
     reference_library: ReferenceLibraryItem[];
     law_reference_library: ReferenceLibraryItem[];
     precedent_reference_library: ReferenceLibraryItem[];
