@@ -55,15 +55,29 @@
     {
       "id": "orch-005",
       "title": "Add claim and status update automation",
-      "status": "pending",
+      "status": "completed",
       "owner_role": "orchestrator",
       "files": [
         "scripts/orchestrator/claim-task.ts",
         "scripts/orchestrator/update-task.ts",
+        "package.json",
+        "ops/tasks.json"
+      ],
+      "validation": ["npm run orch:claim -- --task orch-003 --dry-run", "npm run orch:update -- --task orch-003 --status completed --dry-run", "npm run orch:validate", "npm run typecheck"],
+      "notes": "Orchestrator can now claim pending tasks and move them across lifecycle states with dry-run support."
+    },
+    {
+      "id": "orch-006",
+      "title": "Add reviewer checklist automation",
+      "status": "pending",
+      "owner_role": "orchestrator",
+      "files": [
+        "scripts/orchestrator/review-checklist.ts",
+        "docs/review-notes.md",
         "ops/tasks.json"
       ],
       "validation": ["npm run orch:validate", "npm run typecheck"],
-      "notes": "Allow orchestrator flows to claim tasks and move them through pending/in_progress/completed safely."
+      "notes": "Generate reviewer-facing checklists from task metadata and repository guardrails."
     }
   ]
 }
