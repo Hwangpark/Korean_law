@@ -47,6 +47,7 @@ export function createAnalysisHandler(
   });
   const referencesEndpoint = createReferencesEndpoint({
     authConfig,
+    authService,
     store
   });
 

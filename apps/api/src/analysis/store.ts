@@ -245,11 +245,12 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
   }
 
   async function upsertReferenceSeed(
+    client: PostgresClient,
     seed: ReturnType<typeof buildReferenceSeeds>[number],
     caseId?: string | null,
     runId?: string | null
   ): Promise<ReferenceLibraryItem> {
-    const result = await db.query<ReferenceRow>(
+    const result = await client.query<ReferenceRow>(
       `
         INSERT INTO reference_library (
           kind,
@@ -325,7 +326,10 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
     return mapReferenceRow(row);
   }
 
-  async function saveReferenceLibrary(input: SaveReferenceLibraryInput): Promise<ReferenceLibraryItem[]> {
+  async function saveReferenceLibraryWithClient(
+    client: PostgresClient,
+    input: SaveReferenceLibraryInput
+  ): Promise<ReferenceLibraryItem[]> {
     const seeds = buildReferenceSeeds(input.result, input.providerMode);
     if (seeds.length === 0) {
       return [];
@@ -333,100 +337,106 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
 
     const items: ReferenceLibraryItem[] = [];
     for (const seed of seeds) {
-      items.push(await upsertReferenceSeed(seed, input.caseId ?? null, input.runId ?? null));
+      items.push(await upsertReferenceSeed(client, seed, input.caseId ?? null, input.runId ?? null));
     }
     return items;
+  }
+
+  async function saveReferenceLibrary(input: SaveReferenceLibraryInput): Promise<ReferenceLibraryItem[]> {
+    return saveReferenceLibraryWithClient(db, input);
   }
 
   async function saveAnalysis(
     input: SaveAnalysisInput
   ): Promise<{ caseId: string; runId: string; referenceLibrary: ReferenceLibraryItem[] }> {
-    const caseResult = await db.query<IdRow>(
-      `
-        INSERT INTO analysis_cases (user_id, input_mode, context_type, title, source_url)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id
-      `,
-      [input.userId, input.inputMode, input.contextType, input.title || null, input.sourceUrl ?? null]
-    );
-    const caseId = caseResult.rows[0]?.id;
-    if (!caseId) {
-      throw new Error("Failed to create analysis case.");
-    }
-
-    if (input.persistSourceDocument !== false && input.contentText.trim()) {
-      await db.query(
+    return db.withTransaction(async (client) => {
+      const caseResult = await client.query<IdRow>(
         `
-          INSERT INTO source_documents (
+          INSERT INTO analysis_cases (user_id, input_mode, context_type, title, source_url)
+          VALUES ($1, $2, $3, $4, $5)
+          RETURNING id
+        `,
+        [input.userId, input.inputMode, input.contextType, input.title || null, input.sourceUrl ?? null]
+      );
+      const caseId = caseResult.rows[0]?.id;
+      if (!caseId) {
+        throw new Error("Failed to create analysis case.");
+      }
+
+      if (input.persistSourceDocument !== false && input.contentText.trim()) {
+        await client.query(
+          `
+            INSERT INTO source_documents (
+              case_id,
+              source_kind,
+              original_filename,
+              source_url,
+              mime_type,
+              content_text,
+              content_hash,
+              metadata
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+          `,
+          [
+            caseId,
+            input.sourceKind,
+            input.originalFilename ?? null,
+            input.sourceUrl ?? null,
+            input.mimeType ?? null,
+            input.contentText,
+            stableHash(input.contentText),
+            toJson(input.metadata ?? {})
+          ]
+        );
+      }
+
+      const legalAnalysis = (input.result.legal_analysis ?? {}) as Record<string, unknown>;
+      const runResult = await client.query<IdRow>(
+        `
+          INSERT INTO analysis_runs (
             case_id,
-            source_kind,
-            original_filename,
-            source_url,
-            mime_type,
-            content_text,
-            content_hash,
-            metadata
+            user_id,
+            provider_mode,
+            can_sue,
+            risk_level,
+            profile_snapshot,
+            result_json,
+            preview_json,
+            trace_json,
+            timeline_json
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+          VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb)
+          RETURNING id
         `,
         [
           caseId,
-          input.sourceKind,
-          input.originalFilename ?? null,
-          input.sourceUrl ?? null,
-          input.mimeType ?? null,
-          input.contentText,
-          stableHash(input.contentText),
-          toJson(input.metadata ?? {})
+          input.userId,
+          input.providerMode,
+          Boolean(legalAnalysis.can_sue),
+          Number(legalAnalysis.risk_level ?? 0),
+          toJson(input.profileSnapshot ?? {}),
+          toJson(input.result),
+          toJson(input.preview ?? {}),
+          toJson(input.trace ?? []),
+          toJson(input.timeline)
         ]
       );
-    }
 
-    const legalAnalysis = (input.result.legal_analysis ?? {}) as Record<string, unknown>;
-    const runResult = await db.query<IdRow>(
-      `
-        INSERT INTO analysis_runs (
-          case_id,
-          user_id,
-          provider_mode,
-          can_sue,
-          risk_level,
-          profile_snapshot,
-          result_json,
-          preview_json,
-          trace_json,
-          timeline_json
-        )
-        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb)
-        RETURNING id
-      `,
-      [
+      const runId = runResult.rows[0]?.id;
+      if (!runId) {
+        throw new Error("Failed to create analysis run.");
+      }
+
+      const referenceLibrary = await saveReferenceLibraryWithClient(client, {
+        providerMode: input.providerMode,
+        result: input.result,
         caseId,
-        input.userId,
-        input.providerMode,
-        Boolean(legalAnalysis.can_sue),
-        Number(legalAnalysis.risk_level ?? 0),
-        toJson(input.profileSnapshot ?? {}),
-        toJson(input.result),
-        toJson(input.preview ?? {}),
-        toJson(input.trace ?? []),
-        toJson(input.timeline)
-      ]
-    );
+        runId
+      });
 
-    const runId = runResult.rows[0]?.id;
-    if (!runId) {
-      throw new Error("Failed to create analysis run.");
-    }
-
-    const referenceLibrary = await saveReferenceLibrary({
-      providerMode: input.providerMode,
-      result: input.result,
-      caseId,
-      runId
+      return { caseId, runId, referenceLibrary };
     });
-
-    return { caseId, runId, referenceLibrary };
   }
 
   async function listHistory(userId: number, limit = 12): Promise<AnalysisHistoryItem[]> {

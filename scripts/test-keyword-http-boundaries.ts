@@ -332,6 +332,69 @@ function assertStoredProjectionSanitizesPreviewBoundary(internal: KeywordVerific
   );
 }
 
+function assertStoredProjectionSanitizesTraceBoundary(internal: KeywordVerificationResponse): void {
+  const stored = buildStoredKeywordVerificationResponse({
+    ...internal,
+    retrieval_trace: [
+      {
+        ...(internal.retrieval_trace?.[0] ?? {
+          stage: "law",
+          tool: "search_law",
+          provider: "fixture",
+          duration_ms: 12,
+          cache_hit: false,
+          input_ref: "query:law",
+          output_ref: ["law-1"],
+          reason: "fixture"
+        }),
+        query_refs: [
+          {
+            text: "명예훼손 허위사실",
+            bucket: "precise",
+            channel: "law",
+            sources: ["keyword"],
+            issue_types: ["defamation"],
+            legal_element_signals: ["publicity"],
+            internal_score: 99,
+            private_debug: "leak"
+          } as unknown as Record<string, unknown>
+        ],
+        private_debug: "should-drop",
+        provider_payload: { raw: true }
+      } as unknown as NonNullable<KeywordVerificationResponse["retrieval_trace"]>[number]
+    ]
+  });
+
+  assert.deepEqual(
+    stored.retrieval_trace,
+    [
+      {
+        stage: internal.retrieval_trace?.[0]?.stage ?? "law",
+        tool: internal.retrieval_trace?.[0]?.tool ?? "search_law",
+        provider: internal.retrieval_trace?.[0]?.provider ?? "fixture",
+        duration_ms: internal.retrieval_trace?.[0]?.duration_ms ?? 12,
+        cache_hit: internal.retrieval_trace?.[0]?.cache_hit ?? false,
+        input_ref: internal.retrieval_trace?.[0]?.input_ref ?? "query:law",
+        output_ref: internal.retrieval_trace?.[0]?.output_ref ?? ["law-1"],
+        reason: internal.retrieval_trace?.[0]?.reason ?? "fixture",
+        query_refs: [
+          {
+            text: "명예훼손 허위사실",
+            bucket: "precise",
+            channel: "law",
+            sources: ["keyword"],
+            issue_types: ["defamation"],
+            legal_element_signals: ["publicity"],
+            source_summary: ["keyword", "defamation", "publicity"],
+            redacted: false
+          }
+        ]
+      }
+    ],
+    "stored retrieval_trace should drop future debug/provider payload additions"
+  );
+}
+
 function assertPublicBoundary(publicBody: Record<string, unknown>, internal: KeywordVerificationResponse): void {
   const { guest_id, guest_remaining, ...publicProjection } = publicBody;
 
@@ -377,8 +440,18 @@ function assertPublicBoundary(publicBody: Record<string, unknown>, internal: Key
   assert.ok((matchedLaw.matchedQueryRefs as Array<unknown>).length > 0, "matched law card should expose at least one matched query ref");
   assert.deepEqual(
     Object.keys((matchedLaw.matchedQueryRefs as Array<Record<string, unknown>>)[0] ?? {}).sort(),
-    ["bucket", "channel", "issue_types", "legal_element_signals", "sources", "text"].sort(),
+    ["bucket", "channel", "issue_types", "legal_element_signals", "redacted", "source_summary", "sources", "text"].sort(),
     "public matchedQueryRefs should keep only the safe provenance fields"
+  );
+  assert.deepEqual(
+    matchedLaw.provenanceSummary,
+    {
+      matched_query_count: (matchedLaw.matchedQueryRefs as Array<unknown>).length,
+      redacted_query_count: 0,
+      source_tags: ((matchedLaw.matchedQueryRefs as Array<Record<string, unknown>>).flatMap((item) => item.sources as string[])).filter(Boolean).filter((value, index, array) => array.indexOf(value) === index),
+      issue_types: ((matchedLaw.matchedQueryRefs as Array<Record<string, unknown>>).flatMap((item) => item.issue_types as string[])).filter(Boolean).filter((value, index, array) => array.indexOf(value) === index)
+    },
+    "public matched law card should expose a stable provenance summary"
   );
 
   const legalAnalysis = publicBody.legal_analysis as Record<string, unknown>;
@@ -404,6 +477,10 @@ function assertPublicBoundary(publicBody: Record<string, unknown>, internal: Key
     internal.legal_analysis.charges[0]?.grounding?.citation_id ?? "",
     "public keyword legal_analysis should retain charge citation ids"
   );
+  assert.ok(
+    ((publicCharges[0]?.grounding as Record<string, unknown>)?.provenance_summary as Record<string, unknown>)?.matched_query_count !== undefined,
+    "public keyword charge grounding should expose provenance_summary"
+  );
 
   const publicPrecedents = Array.isArray(legalAnalysis.precedent_cards)
     ? legalAnalysis.precedent_cards as Array<Record<string, unknown>>
@@ -413,6 +490,10 @@ function assertPublicBoundary(publicBody: Record<string, unknown>, internal: Key
     (publicPrecedents[0]?.grounding as Record<string, unknown>)?.citation_id,
     internal.legal_analysis.precedent_cards[0]?.grounding?.citation_id ?? "",
     "public keyword legal_analysis should retain precedent citation ids"
+  );
+  assert.ok(
+    ((publicPrecedents[0]?.grounding as Record<string, unknown>)?.provenance_summary as Record<string, unknown>)?.matched_query_count !== undefined,
+    "public keyword precedent grounding should expose provenance_summary"
   );
 
   const citationMap = legalAnalysis.citation_map as Record<string, unknown>;
@@ -427,6 +508,97 @@ function assertPublicBoundary(publicBody: Record<string, unknown>, internal: Key
     (citationMap.by_statement_path as Record<string, unknown>)?.["legal_analysis.issue_cards[0]"],
     internal.legal_analysis.citation_map?.by_statement_path?.["legal_analysis.issue_cards[0]"] ?? [],
     "public keyword legal_analysis should retain issue card citation path indexing"
+  );
+  assert.ok(
+    ((citationMap.citations as Array<Record<string, unknown>>)?.[0]?.provenance_summary as Record<string, unknown>)?.matched_query_count !== undefined,
+    "public keyword citation_map should expose provenance_summary per citation"
+  );
+}
+
+function assertSensitiveQueryProvenanceBoundary(internal: KeywordVerificationResponse): void {
+  const sharedSensitiveRef = {
+    text: "피해자 실명 김민수 010-1234-5678",
+    bucket: "precise",
+    channel: "law",
+    sources: ["fact", "profile"],
+    issue_types: ["명예훼손"],
+    legal_element_signals: ["공개성"]
+  };
+
+  const publicProjection = buildPublicKeywordVerificationResponse({
+    ...internal,
+    matched_laws: internal.matched_laws.map((card, index) => index === 0
+      ? {
+          ...card,
+          matchedQueries: [sharedSensitiveRef, ...card.matchedQueries]
+        }
+      : card),
+    legal_analysis: {
+      ...internal.legal_analysis,
+      charges: internal.legal_analysis.charges.map((charge, index) => index === 0
+        ? {
+            ...charge,
+            grounding: {
+              ...charge.grounding,
+              query_refs: [sharedSensitiveRef, ...(charge.grounding?.query_refs ?? [])]
+            }
+          }
+        : charge),
+      citation_map: internal.legal_analysis.citation_map
+        ? {
+            ...internal.legal_analysis.citation_map,
+            citations: internal.legal_analysis.citation_map.citations.map((citation, index) => index === 0
+              ? {
+                  ...citation,
+                  query_refs: [sharedSensitiveRef, ...citation.query_refs]
+                }
+              : citation)
+          }
+        : internal.legal_analysis.citation_map
+    }
+  });
+
+  const redactedRef = ((publicProjection.matched_laws as Array<Record<string, unknown>>)[0]?.matchedQueryRefs as Array<Record<string, unknown>>)?.[0];
+  assert.equal(redactedRef?.text, "비공개 질의(fact,profile)", "sensitive public matched query provenance should redact raw text");
+  assert.equal(redactedRef?.redacted, true, "sensitive public matched query provenance should mark redaction");
+
+  const matchedSummary = ((publicProjection.matched_laws as Array<Record<string, unknown>>)[0]?.provenanceSummary as Record<string, unknown>);
+  assert.equal(matchedSummary?.redacted_query_count, 1, "matched law provenance summary should count redacted queries");
+
+  const groundingRef = (((publicProjection.legal_analysis as Record<string, unknown>).charges as Array<Record<string, unknown>>)[0]?.grounding as Record<string, unknown>);
+  assert.equal((((groundingRef.query_refs as Array<Record<string, unknown>>)[0])?.text), "비공개 질의(fact,profile)", "charge grounding should redact sensitive query text");
+  assert.equal(((groundingRef.provenance_summary as Record<string, unknown>)?.redacted_query_count), 1, "charge grounding provenance summary should count redactions");
+
+  const citationRef = ((((publicProjection.legal_analysis as Record<string, unknown>).citation_map as Record<string, unknown>).citations as Array<Record<string, unknown>>)[0]);
+  assert.equal((((citationRef.query_refs as Array<Record<string, unknown>>)[0])?.text), "비공개 질의(fact,profile)", "citation_map should redact sensitive query text");
+  assert.equal(((citationRef.provenance_summary as Record<string, unknown>)?.redacted_query_count), 1, "citation_map provenance summary should count redactions");
+}
+
+function assertProfileContextBoundary(internal: KeywordVerificationResponse): void {
+  const publicProjection = buildPublicKeywordVerificationResponse({
+    ...internal,
+    profile_context: {
+      displayName: "김민수",
+      birthDate: "2008-04-12",
+      ageYears: 17,
+      ageBand: "child",
+      isMinor: true,
+      gender: "male",
+      nationality: "korean",
+      legalNotes: ["보호자 동행 확인"]
+    }
+  });
+
+  assert.deepEqual(
+    publicProjection.profile_context,
+    {
+      ageBand: "child",
+      isMinor: true,
+      gender: "male",
+      nationality: "korean",
+      legalNotes: ["보호자 동행 확인"]
+    },
+    "public keyword response should expose only scrubbed profile context"
   );
 }
 
@@ -569,6 +741,9 @@ async function main(): Promise<void> {
 
   assertStoredBoundary(buildStoredKeywordVerificationResponse(internal), internal);
   assertStoredProjectionSanitizesPreviewBoundary(internal);
+  assertStoredProjectionSanitizesTraceBoundary(internal);
+  assertSensitiveQueryProvenanceBoundary(internal);
+  assertProfileContextBoundary(internal);
 
   const handler = createKeywordVerificationHandler(
     authService,

@@ -1,7 +1,9 @@
 import type http from "node:http";
 
 import type { AuthConfig } from "../auth/config.js";
+import type { AuthService } from "../auth/service.js";
 import {
+  extractBearerToken,
   jsonResponse,
   parseReferenceRoute,
   type AnalysisHttpRouteHandler
@@ -11,7 +13,22 @@ import type { AnalysisStore } from "./store.js";
 
 interface CreateReferencesEndpointInput {
   authConfig: AuthConfig;
+  authService: AuthService;
   store: AnalysisStore;
+}
+
+async function requireReferenceAccess(
+  authService: AuthService,
+  authorizationHeader: string | undefined
+): Promise<void> {
+  const token = extractBearerToken(authorizationHeader);
+  if (!token) {
+    const error = new Error("Authentication is required for reference access.") as AnalysisHttpError;
+    error.status = 401;
+    throw error;
+  }
+
+  await authService.verifyToken(token);
 }
 
 export function createReferencesEndpoint(
@@ -24,6 +41,7 @@ export function createReferencesEndpoint(
   ): Promise<boolean> {
     if (req.method === "GET" && pathname === "/api/references/search") {
       try {
+        await requireReferenceAccess(input.authService, req.headers.authorization);
         const searchUrl = new URL(req.url ?? "/api/references/search", "http://localhost");
         const query = String(searchUrl.searchParams.get("q") ?? "").trim();
         if (!query) {
@@ -59,6 +77,7 @@ export function createReferencesEndpoint(
     }
 
     try {
+      await requireReferenceAccess(input.authService, req.headers.authorization);
       const item = await input.store.getReferenceByKindAndId(
         referenceRoute.kind,
         referenceRoute.id

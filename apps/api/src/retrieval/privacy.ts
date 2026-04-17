@@ -1,3 +1,4 @@
+import { sanitizePublicProfileContext } from "../analysis/profile-context.js";
 import type {
   CandidateIssue,
   KeywordVerificationResponse,
@@ -107,27 +108,80 @@ function sanitizePublicPlan(
   };
 }
 
+const SENSITIVE_QUERY_SOURCES = new Set(["fact", "profile", "llm", "hypothesis"]);
+
+function buildSafeQueryRef(value: unknown): Record<string, unknown> {
+  const query = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const sources = sanitizeStringArray(query.sources);
+  const issueTypes = sanitizeStringArray(query.issue_types);
+  const legalElementSignals = sanitizeStringArray(query.legal_element_signals);
+  const sensitiveSources = sources.filter((source) => SENSITIVE_QUERY_SOURCES.has(source));
+  const rawText = sanitizeString(query.text);
+  const redacted = sensitiveSources.length > 0;
+  const text = redacted
+    ? `비공개 질의(${sensitiveSources.join(",")})`
+    : rawText;
+
+  return {
+    text,
+    bucket: sanitizeString(query.bucket),
+    channel: sanitizeString(query.channel),
+    sources,
+    issue_types: issueTypes,
+    legal_element_signals: legalElementSignals,
+    source_summary: [...new Set([...sources, ...issueTypes, ...legalElementSignals])],
+    redacted
+  };
+}
+
+function buildProvenanceSummary(queryRefs: Array<Record<string, unknown>>): Record<string, unknown> {
+  const sourceTags = [...new Set(queryRefs.flatMap((query) => sanitizeStringArray(query.sources)))];
+  const issueTypes = [...new Set(queryRefs.flatMap((query) => sanitizeStringArray(query.issue_types)))];
+  return {
+    matched_query_count: queryRefs.length,
+    redacted_query_count: queryRefs.filter((query) => sanitizeBoolean(query.redacted)).length,
+    source_tags: sourceTags,
+    issue_types: issueTypes
+  };
+}
+
 function sanitizePublicQueryRefs(value: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) {
     return [];
   }
 
   return value
-    .map((query) => (query && typeof query === "object" && !Array.isArray(query)
-      ? query as Record<string, unknown>
+    .map((query) => buildSafeQueryRef(query))
+    .filter((query) => sanitizeString(query.text));
+}
+
+function sanitizeRetrievalTrace(value: KeywordVerificationResponse["retrieval_trace"]): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => (entry && typeof entry === "object" && !Array.isArray(entry)
+      ? entry as unknown as Record<string, unknown>
       : {}))
-    .map((query) => ({
-      text: sanitizeString(query.text),
-      bucket: sanitizeString(query.bucket),
-      channel: sanitizeString(query.channel),
-      sources: sanitizeStringArray(query.sources),
-      issue_types: sanitizeStringArray(query.issue_types),
-      legal_element_signals: sanitizeStringArray(query.legal_element_signals)
+    .map((entry) => ({
+      stage: sanitizeString(entry.stage),
+      tool: sanitizeString(entry.tool),
+      provider: sanitizeString(entry.provider),
+      duration_ms: sanitizeNumber(entry.duration_ms),
+      cache_hit: sanitizeBoolean(entry.cache_hit),
+      input_ref: sanitizeString(entry.input_ref),
+      output_ref: sanitizeStringArray(entry.output_ref),
+      reason: sanitizeString(entry.reason),
+      ...(entry.query_refs !== undefined ? { query_refs: sanitizePublicQueryRefs(entry.query_refs) } : {})
     }))
-    .filter((query) => query.text);
+    .filter((entry) => entry.stage || entry.tool || entry.provider || entry.input_ref || entry.reason || entry.output_ref.length > 0);
 }
 
 function sanitizePublicReferenceCard(card: VerifiedReferenceCard): Record<string, unknown> {
+  const matchedQueryRefs = sanitizePublicQueryRefs(card.matchedQueries);
   return {
     id: sanitizeString(card.id),
     referenceKey: sanitizeString(card.referenceKey),
@@ -137,10 +191,9 @@ function sanitizePublicReferenceCard(card: VerifiedReferenceCard): Record<string
     summary: sanitizeString(card.summary),
     confidenceScore: sanitizeNumber(card.confidenceScore),
     matchReason: sanitizeString(card.matchReason),
-    matchedQueries: Array.isArray(card.matchedQueries)
-      ? card.matchedQueries.map((query) => sanitizeString(query?.text)).filter(Boolean)
-      : [],
-    matchedQueryRefs: sanitizePublicQueryRefs(card.matchedQueries),
+    matchedQueries: matchedQueryRefs.map((query) => sanitizeString(query.text)).filter(Boolean),
+    matchedQueryRefs: matchedQueryRefs,
+    provenanceSummary: buildProvenanceSummary(matchedQueryRefs),
     matchedIssueTypes: sanitizeStringArray(card.matchedIssueTypes),
     snippet: sanitizeString(card.snippet?.text),
     source: {
@@ -174,18 +227,8 @@ function sanitizeQueryRefs(value: unknown): Array<Record<string, unknown>> {
   }
 
   return value
-    .map((item) => (item && typeof item === "object" && !Array.isArray(item)
-      ? item as Record<string, unknown>
-      : {}))
-    .map((item) => ({
-      text: sanitizeString(item.text),
-      bucket: sanitizeString(item.bucket),
-      channel: sanitizeString(item.channel),
-      sources: sanitizeStringArray(item.sources),
-      issue_types: sanitizeStringArray(item.issue_types),
-      legal_element_signals: sanitizeStringArray(item.legal_element_signals)
-    }))
-    .filter((item) => item.text);
+    .map((item) => buildSafeQueryRef(item))
+    .filter((item) => sanitizeString(item.text));
 }
 
 function sanitizeSnippet(value: unknown): Record<string, unknown> {
@@ -202,12 +245,14 @@ function sanitizeChargeGrounding(value: unknown): Record<string, unknown> {
   const grounding = value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+  const queryRefs = sanitizeQueryRefs(grounding.query_refs);
   return {
     citation_id: sanitizeString(grounding.citation_id),
     law_reference_id: sanitizeString(grounding.law_reference_id),
     precedent_reference_ids: sanitizeStringArray(grounding.precedent_reference_ids),
     reference_key: sanitizeString(grounding.reference_key),
-    query_refs: sanitizeQueryRefs(grounding.query_refs),
+    query_refs: queryRefs,
+    provenance_summary: buildProvenanceSummary(queryRefs),
     match_reason: sanitizeString(grounding.match_reason),
     snippet: sanitizeSnippet(grounding.snippet),
     evidence_count: sanitizeNumber(grounding.evidence_count)
@@ -218,11 +263,13 @@ function sanitizePrecedentGrounding(value: unknown): Record<string, unknown> {
   const grounding = value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+  const queryRefs = sanitizeQueryRefs(grounding.query_refs);
   return {
     citation_id: sanitizeString(grounding.citation_id),
     reference_id: sanitizeString(grounding.reference_id),
     reference_key: sanitizeString(grounding.reference_key),
-    query_refs: sanitizeQueryRefs(grounding.query_refs),
+    query_refs: queryRefs,
+    provenance_summary: buildProvenanceSummary(queryRefs),
     match_reason: sanitizeString(grounding.match_reason),
     snippet: sanitizeSnippet(grounding.snippet),
     evidence_count: sanitizeNumber(grounding.evidence_count)
@@ -238,21 +285,25 @@ function sanitizeCitationMap(value: unknown): Record<string, unknown> | null {
       .map((item) => (item && typeof item === "object" && !Array.isArray(item)
         ? item as Record<string, unknown>
         : {}))
-      .map((item) => ({
-        citation_id: sanitizeString(item.citation_id),
-        reference_id: sanitizeString(item.reference_id),
-        reference_key: sanitizeString(item.reference_key),
-        kind: sanitizeString(item.kind),
-        statement_type: sanitizeString(item.statement_type),
-        statement_path: sanitizeString(item.statement_path),
-        title: sanitizeString(item.title),
-        confidence_score: sanitizeNumber(item.confidence_score),
-        match_reason: sanitizeString(item.match_reason),
-        matched_issue_types: sanitizeStringArray(item.matched_issue_types),
-        query_refs: sanitizeQueryRefs(item.query_refs),
-        query_source_tags: sanitizeStringArray(item.query_source_tags),
-        snippet: sanitizeSnippet(item.snippet)
-      }))
+      .map((item) => {
+        const queryRefs = sanitizeQueryRefs(item.query_refs);
+        return {
+          citation_id: sanitizeString(item.citation_id),
+          reference_id: sanitizeString(item.reference_id),
+          reference_key: sanitizeString(item.reference_key),
+          kind: sanitizeString(item.kind),
+          statement_type: sanitizeString(item.statement_type),
+          statement_path: sanitizeString(item.statement_path),
+          title: sanitizeString(item.title),
+          confidence_score: sanitizeNumber(item.confidence_score),
+          match_reason: sanitizeString(item.match_reason),
+          matched_issue_types: sanitizeStringArray(item.matched_issue_types),
+          query_refs: queryRefs,
+          provenance_summary: buildProvenanceSummary(queryRefs),
+          query_source_tags: sanitizeStringArray(item.query_source_tags),
+          snippet: sanitizeSnippet(item.snippet)
+        };
+      })
       .filter((item) => item.citation_id)
     : [];
 
@@ -350,9 +401,11 @@ function sanitizePublicLegalAnalysis(
 export function buildPublicKeywordVerificationResponse(
   response: KeywordVerificationResponse
 ): Record<string, unknown> {
+  const publicProfileContext = sanitizePublicProfileContext(response.profile_context as Record<string, unknown> | null | undefined);
+
   return {
     run_id: response.run_id,
-    ...(response.profile_context ? { profile_context: response.profile_context } : {}),
+    ...(publicProfileContext ? { profile_context: publicProfileContext } : {}),
     query: response.query,
     plan: sanitizePublicPlan(response.plan),
     verification: response.verification,
@@ -366,14 +419,16 @@ export function buildPublicKeywordVerificationResponse(
 export function buildStoredKeywordVerificationResponse(
   response: KeywordVerificationResponse
 ): Record<string, unknown> {
+  const publicProfileContext = sanitizePublicProfileContext(response.profile_context as Record<string, unknown> | null | undefined);
+
   return {
     run_id: response.run_id,
-    ...(response.profile_context ? { profile_context: response.profile_context } : {}),
+    ...(publicProfileContext ? { profile_context: publicProfileContext } : {}),
     query: response.query,
     plan: sanitizePublicPlan(response.plan),
     verification: response.verification,
     ...(response.retrieval_preview ? { retrieval_preview: sanitizePublicRetrievalPreview(response.retrieval_preview) } : {}),
-    ...(response.retrieval_trace ? { retrieval_trace: response.retrieval_trace } : {}),
+    ...(response.retrieval_trace ? { retrieval_trace: sanitizeRetrievalTrace(response.retrieval_trace) } : {}),
     retrieval_evidence_pack: {
       version: response.retrieval_evidence_pack.version,
       run_id: response.retrieval_evidence_pack.run_id ?? response.run_id,

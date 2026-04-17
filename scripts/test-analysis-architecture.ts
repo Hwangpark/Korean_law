@@ -18,8 +18,9 @@ import {
 } from "../apps/api/src/analysis/privacy.js";
 import { applyPreOutputSafetyGate } from "../apps/api/src/analysis/safety-gate.mjs";
 import { buildPreAnalysisVerifier } from "../apps/api/src/analysis/verifier.mjs";
-import type { AnalysisStore, GuestUsageIdentity, GuestUsageResult } from "../apps/api/src/analysis/store.js";
+import { createAnalysisStore, type AnalysisStore, type GuestUsageIdentity, type GuestUsageResult } from "../apps/api/src/analysis/store.js";
 import type { AuthConfig } from "../apps/api/src/auth/config.js";
+import type { PostgresClient } from "../apps/api/src/auth/postgres.js";
 import type { AuthService } from "../apps/api/src/auth/service.js";
 import { createKeywordVerificationHandler } from "../apps/api/src/retrieval/http.js";
 import type { KeywordVerificationService } from "../apps/api/src/retrieval/service.js";
@@ -309,6 +310,19 @@ async function withServer(
       });
     });
   }
+}
+
+async function getJson(url: string, headers: Record<string, string> = {}): Promise<ResponseSnapshot> {
+  const response = await fetch(url, {
+    method: "GET",
+    headers
+  });
+
+  const payload = await response.json() as Record<string, unknown>;
+  return {
+    status: response.status,
+    body: payload
+  };
 }
 
 async function postJson(url: string, body: Record<string, unknown>, headers: Record<string, string> = {}): Promise<ResponseSnapshot> {
@@ -710,6 +724,158 @@ async function verifyAnalysisCitationMapMatchesFinalCharges(): Promise<void> {
     assert.ok(charge, "charge citation path should point to an existing final charge");
     assert.equal(citation.reference_id, charge.grounding?.law_reference_id);
   }
+}
+
+async function verifyReferenceEndpointsRequireAuthentication(): Promise<void> {
+  const authConfig = createTestAuthConfig();
+  const analysisConfig = createTestAnalysisConfig();
+  const authService = createMockAuthService();
+  const store = createQuotaTrackingStore();
+  store.searchReferences = async () => [{
+    id: "law:test",
+    kind: "law",
+    sourceKey: "law:test",
+    sourceMode: "mock",
+    title: "형법 제307조",
+    subtitle: "명예훼손",
+    summary: "요약",
+    details: "상세",
+    url: "https://example.com/law",
+    articleNo: "307",
+    caseNo: null,
+    court: null,
+    verdict: null,
+    penalty: "2년 이하",
+    similarityScore: null,
+    keywords: [],
+    payload: {}
+  }];
+  store.getReferenceByKindAndId = async () => ({
+    id: "law:test",
+    kind: "law",
+    sourceKey: "law:test",
+    sourceMode: "mock",
+    title: "형법 제307조",
+    subtitle: "명예훼손",
+    summary: "요약",
+    details: "상세",
+    url: "https://example.com/law",
+    articleNo: "307",
+    caseNo: null,
+    court: null,
+    verdict: null,
+    penalty: "2년 이하",
+    similarityScore: null,
+    keywords: [],
+    payload: {}
+  });
+
+  await withServer(
+    () => createAnalysisHandler(authService, authConfig, analysisConfig, store, createAnalysisJobManager()),
+    async (baseUrl) => {
+      const unauthenticatedSearch = await getJson(`${baseUrl}/api/references/search?q=%EB%AA%85%EC%98%88%ED%9B%BC%EC%86%90`);
+      assert.equal(unauthenticatedSearch.status, 401, "reference search should reject unauthenticated requests");
+
+      const unauthenticatedDetail = await getJson(`${baseUrl}/api/references/law/law%3Atest`);
+      assert.equal(unauthenticatedDetail.status, 401, "reference detail should reject unauthenticated requests");
+
+      const authenticatedSearch = await getJson(
+        `${baseUrl}/api/references/search?q=%EB%AA%85%EC%98%88%ED%9B%BC%EC%86%90`,
+        { authorization: "Bearer test-token" }
+      );
+      assert.equal(authenticatedSearch.status, 200, "reference search should allow authenticated requests");
+
+      const authenticatedDetail = await getJson(
+        `${baseUrl}/api/references/law/law%3Atest`,
+        { authorization: "Bearer test-token" }
+      );
+      assert.equal(authenticatedDetail.status, 200, "reference detail should allow authenticated requests");
+    }
+  );
+}
+
+async function verifySaveAnalysisUsesTransactionBoundary(): Promise<void> {
+  const events: string[] = [];
+  let committedCaseInserted = false;
+  let committedRunInserted = false;
+
+  const db: PostgresClient = {
+    async query() {
+      throw new Error("top-level query should not be used for saveAnalysis");
+    },
+    async withTransaction(fn) {
+      events.push("BEGIN");
+      let caseInserted = false;
+      let runInserted = false;
+      const client: PostgresClient = {
+        async query(text: string) {
+          if (text.includes("INSERT INTO analysis_cases")) {
+            caseInserted = true;
+            return { rows: [{ id: "case-1" }], rowCount: 1 };
+          }
+          if (text.includes("INSERT INTO analysis_runs")) {
+            runInserted = true;
+            return { rows: [{ id: "run-1" }], rowCount: 1 };
+          }
+          if (text.includes("INSERT INTO reference_library")) {
+            throw new Error("reference write failed");
+          }
+          throw new Error(`Unexpected query: ${text}`);
+        },
+        async withTransaction(innerFn) {
+          return innerFn(client);
+        },
+        async close() {
+          return undefined;
+        }
+      };
+
+      try {
+        const result = await fn(client);
+        events.push("COMMIT");
+        committedCaseInserted = caseInserted;
+        committedRunInserted = runInserted;
+        return result;
+      } catch (error) {
+        events.push("ROLLBACK");
+        throw error;
+      }
+    },
+    async close() {
+      return undefined;
+    }
+  };
+
+  const store = createAnalysisStore(db);
+  await assert.rejects(
+    () => store.saveAnalysis({
+      userId: 1,
+      inputMode: "text",
+      contextType: "community",
+      title: "test",
+      sourceKind: "manual",
+      contentText: "",
+      providerMode: "mock",
+      result: {
+        legal_analysis: {},
+        law_search: {
+          laws: [{
+            law_name: "형법",
+            article_no: "제307조",
+            article_title: "명예훼손",
+            content: "공연히 사실을 적시하여 명예를 훼손한 자",
+            penalty: "2년 이하 징역"
+          }]
+        }
+      },
+      timeline: []
+    }),
+    /reference write failed/
+  );
+
+  assert.deepEqual(events, ["BEGIN", "ROLLBACK"], "saveAnalysis should rollback the whole transaction on reference persistence failure");
+  assert.equal(committedCaseInserted, false, "failed transaction must not commit inserted case rows");
+  assert.equal(committedRunInserted, false, "failed transaction must not commit inserted run rows");
 }
 
 async function main() {
@@ -1699,6 +1865,8 @@ async function main() {
   await verifyRetrievalToolGuestQuotaIgnoresForgedForwardedFor();
   await verifyTrustedProxyCanForwardClientIp();
   await verifyAnalysisCitationMapMatchesFinalCharges();
+  await verifyReferenceEndpointsRequireAuthentication();
+  await verifySaveAnalysisUsesTransactionBoundary();
 
   process.stdout.write("Analysis architecture checks passed.\n");
 }

@@ -1,3 +1,4 @@
+import { sanitizePublicProfileContext } from "../analysis/profile-context.js";
 import type { GuestUsageResult } from "../analysis/store.js";
 
 function formatGuestUsage(usage: GuestUsageResult): Record<string, unknown> {
@@ -30,11 +31,16 @@ export function buildKeywordAuthenticatedEnvelope(
     return publicResult;
   }
 
+  const sanitizedProfileContext = sanitizePublicProfileContext(profileContext);
+  if (!sanitizedProfileContext) {
+    return publicResult;
+  }
+
   return {
     ...publicResult,
     profile_context:
       (publicResult.profile_context as Record<string, unknown> | undefined) ??
-      profileContext
+      sanitizedProfileContext
   };
 }
 

@@ -169,3 +169,36 @@ export function buildProfileContext(profile: ProfileLike | null | undefined): Us
     })
   };
 }
+
+export function sanitizePublicProfileContext(profile: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)) {
+    return null;
+  }
+
+  const gender = normalizeGender(profile.gender);
+  const nationality = normalizeNationality(profile.nationality);
+  const ageYears = normalizeAgeYears(profile.ageYears ?? profile.age_years);
+  const ageBand = normalizeAgeBand(profile.ageBand ?? profile.age_band) ?? deriveAgeBand(ageYears);
+  const isMinor = typeof profile.isMinor === "boolean"
+    ? profile.isMinor
+    : typeof profile.is_minor === "boolean"
+      ? profile.is_minor
+      : typeof ageYears === "number"
+        ? ageYears < 19
+        : false;
+  const legalNotes = Array.isArray(profile.legalNotes)
+    ? profile.legalNotes.map((item) => String(item ?? "").trim()).filter(Boolean)
+    : Array.isArray(profile.legal_notes)
+      ? profile.legal_notes.map((item) => String(item ?? "").trim()).filter(Boolean)
+      : buildLegalNotes({ ageBand, isMinor, nationality });
+
+  const sanitized = {
+    ...(gender ? { gender } : {}),
+    ...(nationality ? { nationality } : {}),
+    ageBand,
+    isMinor,
+    ...(legalNotes.length > 0 ? { legalNotes } : {})
+  };
+
+  return Object.keys(sanitized).length > 0 ? sanitized : null;
+}
