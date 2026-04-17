@@ -1,15 +1,12 @@
-# Review Checklist · orch-006
+# Review Checklist · orch-003
 
-- Generated at: 2026-04-17T01:40:02.914Z
-- Task: Add reviewer checklist automation
-- Status: completed
-- Owner role: orchestrator
+- Generated at: 2026-04-17T02:01:45Z
+- Task: Add reviewer checklist output
+- Status: pending
+- Owner role: reviewer
 
 ## Files in scope
-- scripts/orchestrator/review-checklist.ts
 - docs/review-notes.md
-- package.json
-- ops/tasks.json
 
 ## Review focus
 - 법률 정확성 표현이 과도하지 않은지 확인
@@ -18,10 +15,7 @@
 - 파일 경계 위반이나 스파게티 결합이 생기지 않았는지 확인
 
 ## Validation commands
-- npm run orch:review -- --task orch-006
-- npm run orch:review -- --task orch-006 --write
-- npm run orch:validate
-- npm run typecheck
+- npm run check
 
 ## Reviewer guardrails
 - Do not touch apps/api/src/**
@@ -35,7 +29,13 @@
 - Do not remove privacy masking, guest quota, or disclaimer rules.
 - Stop after three repeated failures on the same error and report a new plan.
 
+## Pilot handoff behavior
+- `npm run orch:brief -- --task orch-003` produced a reviewer-scoped brief with the expected read-first docs, single-file ownership (`docs/review-notes.md`), and `npm run check` validation gate.
+- `npm run orch:run -- --task orch-003 --json` emitted an OpenClaw `recommended_spawn.task` payload suitable for a real subagent handoff.
+- `npm run orch:review -- --task orch-003` generated the reviewer checklist without crossing ownership boundaries.
+
 ## Findings
 - Result: pending review
 - Notes:
-  - 
+  - The handoff path is working end to end for orch-003: brief generation, spawn-ready payload generation, and reviewer checklist generation all align on the same task metadata.
+  - Reviewer findings are still pending because no reviewer implementation pass or `npm run check` run was performed as part of this pilot.

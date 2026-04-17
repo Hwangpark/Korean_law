@@ -13,7 +13,9 @@
         "ops/agent-roles.json",
         "ops/tasks.json"
       ],
-      "validation": ["npm run typecheck"],
+      "validation": [
+        "npm run typecheck"
+      ],
       "notes": "Initial rule set for file ownership, validation gates, and MCP-first boundaries."
     },
     {
@@ -25,7 +27,10 @@
         "scripts/orchestrator/next-task.ts",
         "scripts/orchestrator/validate-task.ts"
       ],
-      "validation": ["npm run typecheck", "npm run orch:validate"],
+      "validation": [
+        "npm run typecheck",
+        "npm run orch:validate"
+      ],
       "notes": "Machine-readable task selection and validation commands now scaffold the orchestration flow."
     },
     {
@@ -36,7 +41,9 @@
       "files": [
         "docs/review-notes.md"
       ],
-      "validation": ["npm run check"],
+      "validation": [
+        "npm run check"
+      ],
       "notes": "Use after the next feature implementation to record review findings and residual risks."
     },
     {
@@ -49,7 +56,11 @@
         "package.json",
         "ops/tasks.json"
       ],
-      "validation": ["npm run orch:brief -- --json", "npm run orch:validate", "npm run typecheck"],
+      "validation": [
+        "npm run orch:brief -- --json",
+        "npm run orch:validate",
+        "npm run typecheck"
+      ],
       "notes": "Reusable handoff briefs now include file ownership, role guardrails, and suggested validation commands."
     },
     {
@@ -63,7 +74,12 @@
         "package.json",
         "ops/tasks.json"
       ],
-      "validation": ["npm run orch:claim -- --task orch-003 --dry-run", "npm run orch:update -- --task orch-003 --status completed --dry-run", "npm run orch:validate", "npm run typecheck"],
+      "validation": [
+        "npm run orch:claim -- --task orch-003 --dry-run",
+        "npm run orch:update -- --task orch-003 --status completed --dry-run",
+        "npm run orch:validate",
+        "npm run typecheck"
+      ],
       "notes": "Orchestrator can now claim pending tasks and move them across lifecycle states with dry-run support."
     },
     {
@@ -77,7 +93,12 @@
         "package.json",
         "ops/tasks.json"
       ],
-      "validation": ["npm run orch:review -- --task orch-006", "npm run orch:review -- --task orch-006 --write", "npm run orch:validate", "npm run typecheck"],
+      "validation": [
+        "npm run orch:review -- --task orch-006",
+        "npm run orch:review -- --task orch-006 --write",
+        "npm run orch:validate",
+        "npm run typecheck"
+      ],
       "notes": "Reviewer checklists can now be generated from task metadata and written to docs/review-notes.md."
     },
     {
@@ -91,7 +112,11 @@
         "ops/tasks.json",
         "docs/codex-orchestration.md"
       ],
-      "validation": ["npm run orch:run -- --json", "npm run orch:validate", "npm run typecheck"],
+      "validation": [
+        "npm run orch:run -- --json",
+        "npm run orch:validate",
+        "npm run typecheck"
+      ],
       "notes": "The orchestrator can now emit a spawn-ready OpenClaw subagent task payload for the next pending task."
     },
     {
@@ -103,20 +128,31 @@
         "docs/codex-orchestration.md",
         "ops/tasks.json"
       ],
-      "validation": ["npm run orch:run -- --json", "npm run orch:validate", "npm run typecheck"],
+      "validation": [
+        "npm run orch:run -- --json",
+        "npm run orch:validate",
+        "npm run typecheck"
+      ],
       "notes": "Documented the mapping from repo-side run payloads to OpenClaw sessions_spawn and sessions_yield flow."
     },
     {
       "id": "orch-009",
       "title": "Pilot one delegated KoreanLaw task through a real subagent run",
-      "status": "pending",
+      "status": "completed",
       "owner_role": "orchestrator",
       "files": [
         "docs/review-notes.md",
         "ops/tasks.json"
       ],
-      "validation": ["npm run orch:review -- --task orch-003", "npm run orch:validate", "npm run typecheck"],
-      "notes": "Use the orchestration flow on one real task and record the resulting handoff/review behavior."
+      "validation": [
+        "npm run orch:review -- --task orch-003",
+        "npm run orch:validate",
+        "npm run typecheck"
+      ],
+      "notes": "Piloted orch-003 through the repo orchestration flow. Recorded the generated brief, spawn-ready handoff payload, and reviewer checklist behavior in docs/review-notes.md.",
+      "claimed_by": "orchestrator",
+      "claimed_at": "2026-04-17T01:49:49.688Z",
+      "updated_at": "2026-04-17T02:01:45Z"
     }
   ]
 }
