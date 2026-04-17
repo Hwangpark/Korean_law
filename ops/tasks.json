@@ -83,6 +83,20 @@
     {
       "id": "orch-007",
       "title": "Prepare subagent runner automation",
+      "status": "completed",
+      "owner_role": "orchestrator",
+      "files": [
+        "scripts/orchestrator/run-subagent.ts",
+        "package.json",
+        "ops/tasks.json",
+        "docs/codex-orchestration.md"
+      ],
+      "validation": ["npm run orch:run -- --json", "npm run orch:validate", "npm run typecheck"],
+      "notes": "The orchestrator can now emit a spawn-ready OpenClaw subagent task payload for the next pending task."
+    },
+    {
+      "id": "orch-008",
+      "title": "Connect orchestration runner to live OpenClaw session spawning",
       "status": "pending",
       "owner_role": "orchestrator",
       "files": [
@@ -90,7 +104,7 @@
         "ops/tasks.json"
       ],
       "validation": ["npm run orch:validate", "npm run typecheck"],
-      "notes": "Define how the orchestrator should launch subagents from generated briefs without crossing ownership rules."
+      "notes": "Document and prototype how the generated run payload maps to sessions_spawn and sessions_yield in a live OpenClaw orchestrator session."
     }
   ]
 }

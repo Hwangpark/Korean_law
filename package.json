@@ -43,6 +43,7 @@
     "orch:claim": "tsx scripts/orchestrator/claim-task.ts",
     "orch:update": "tsx scripts/orchestrator/update-task.ts",
     "orch:review": "tsx scripts/orchestrator/review-checklist.ts",
+    "orch:run": "tsx scripts/orchestrator/run-subagent.ts",
     "orch:validate": "tsx scripts/orchestrator/validate-task.ts",
     "test": "npm run test:mock",
     "check": "npm run test:mock && npm run test:analysis && npm run test:analysis-sse && npm run test:abuse && npm run test:guided-extraction && npm run test:bridge && npm run test:evidence-pack && npm run test:retrieval-snippets && npm run test:retrieval-rerank && npm run test:retrieval-provider && npm run test:mixed-fixtures && npm run test:scope-filter && npm run test:judgment-core && npm run test:verification-core && npm run test:verification-messaging && npm run test:keyword && npm run test:keyword-http && npm run test:policy && npm run typecheck && npm run web:check"
