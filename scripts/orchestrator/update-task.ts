@@ -86,7 +86,7 @@ function main() {
     ...(nextStatus === "pending"
       ? { claimed_by: undefined, claimed_at: undefined, completed_at: undefined, blocked_reason: undefined }
       : {}),
-    ...(task.claimed_by ? { claimed_by: task.claimed_by } : { claimed_by: actor })
+    claimed_by: task.claimed_by ?? actor
   };
 
   const nextFile: TasksFile = {

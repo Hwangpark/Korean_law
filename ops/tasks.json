@@ -36,7 +36,7 @@
     {
       "id": "orch-003",
       "title": "Add reviewer checklist output",
-      "status": "pending",
+      "status": "completed",
       "owner_role": "reviewer",
       "files": [
         "docs/review-notes.md"
@@ -44,7 +44,11 @@
       "validation": [
         "npm run check"
       ],
-      "notes": "Use after the next feature implementation to record review findings and residual risks."
+      "notes": "Reviewer checklist output generated and written to docs/review-notes.md for orchestration review handoff.",
+      "claimed_by": "reviewer",
+      "claimed_at": "2026-04-17T02:06:14.374Z",
+      "updated_at": "2026-04-17T02:06:14.374Z",
+      "completed_at": "2026-04-17T02:06:14.374Z"
     },
     {
       "id": "orch-004",
