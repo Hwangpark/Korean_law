@@ -2596,3 +2596,154 @@ body {
   opacity: 0.35;
   pointer-events: none;
 }
+
+.runtime-dashboard {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr);
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.runtime-dashboard-card,
+.runtime-history-card {
+  padding: 20px;
+  border-radius: 20px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
+}
+
+.runtime-dashboard-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.runtime-dashboard-sub {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 14px;
+}
+
+.runtime-job-pill,
+.runtime-run-summary span,
+.runtime-history-meta span {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #334155;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.runtime-run-summary,
+.runtime-history-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.runtime-run-summary {
+  margin-bottom: 16px;
+}
+
+.runtime-timeline-list,
+.runtime-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.runtime-timeline-item,
+.runtime-history-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 16px;
+  background: #f8fafc;
+}
+
+.runtime-timeline-copy,
+.runtime-history-item > div:first-child {
+  min-width: 0;
+}
+
+.runtime-timeline-copy strong,
+.runtime-history-item strong {
+  display: block;
+  color: #0f172a;
+}
+
+.runtime-timeline-copy span,
+.runtime-history-item p {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.runtime-history-item p {
+  margin-bottom: 0;
+}
+
+.runtime-timeline-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: #e2e8f0;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.runtime-timeline-item-active .runtime-timeline-dot {
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.runtime-timeline-item-done .runtime-timeline-dot {
+  background: rgba(34, 197, 94, 0.14);
+  color: #15803d;
+}
+
+.runtime-timeline-meta {
+  text-align: right;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.runtime-timeline-meta em {
+  display: block;
+  margin-top: 4px;
+  font-style: normal;
+}
+
+.runtime-empty {
+  border-radius: 16px;
+  background: #f8fafc;
+  padding: 18px;
+  color: #64748b;
+  font-size: 14px;
+}
+
+@media (max-width: 960px) {
+  .runtime-dashboard {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-timeline-item,
+  .runtime-history-item {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .runtime-timeline-meta,
+  .runtime-history-meta {
+    grid-column: 2;
+    text-align: left;
+  }
+}

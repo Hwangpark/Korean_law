@@ -2077,6 +2077,18 @@ export default function App() {
         </p>
       </div>
 
+      <RuntimeDashboard
+        currentRun={currentRun}
+        activeJobId={activeJobId}
+        runtimeTimeline={runtimeTimeline}
+        analysisHistory={analysisHistory}
+        historyBusy={historyBusy}
+        formatContextType={formatContextType}
+        formatInputMode={formatInputMode}
+        formatKoreanDateTime={formatKoreanDateTime}
+        formatDuration={formatDuration}
+      />
+
       {keywordResult && (
         <section className="result-section keyword-result-section">
           <div className="keyword-result-head">
@@ -2168,84 +2180,14 @@ export default function App() {
           </div>
 
           <div className="keyword-detail-shell" ref={keywordDetailPanelRef}>
-            {selectedKeywordDetail ? (
-              <div className="detail-panel-body detail-panel-body-inline">
-                <div className="detail-panel-toolbar">
-                  <span className="detail-panel-count">
-                    {selectedKeywordDetail.references.length > 0
-                      ? `${selectedKeywordDetail.references.length}개 근거`
-                      : '선택한 근거'}
-                  </span>
-                  <button
-                    className="detail-close-btn"
-                    type="button"
-                    onClick={() => setSelectedKeywordDetail(null)}
-                  >
-                    닫기
-                  </button>
-                </div>
-                <div className="detail-panel-kicker">{selectedKeywordDetail.eyebrow}</div>
-                <h4 className="detail-panel-title">{selectedKeywordDetail.title}</h4>
-                <p className="detail-panel-summary">{selectedKeywordDetail.summary}</p>
-
-                {selectedKeywordDetail.metadata.length > 0 && (
-                  <div className="detail-metadata">
-                    {selectedKeywordDetail.metadata.map((meta) => (
-                      <div key={`${meta.label}-${meta.value}`} className="detail-metadata-item">
-                        <span>{meta.label}</span>
-                        <strong>{meta.value}</strong>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {selectedKeywordDetail.highlights.length > 0 && (
-                  <div className="detail-highlight-list">
-                    {selectedKeywordDetail.highlights.map((item) => (
-                      <div key={item} className="detail-highlight-item">
-                        <span className="detail-highlight-dot" />
-                        <span>{item}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {selectedKeywordDetail.references.length > 0 ? (
-                  <div className="detail-reference-list">
-                    {selectedKeywordDetail.references.map((ref) =>
-                      ref.url ? (
-                        <a
-                          key={`${ref.title}-${ref.summary}-${ref.url}`}
-                          className="detail-reference-item"
-                          href={ref.url}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          <div className="detail-reference-text">
-                            <strong>{ref.title}</strong>
-                            <span>{ref.summary}</span>
-                          </div>
-                          {ref.subtitle && <span className="detail-reference-subtitle">{ref.subtitle}</span>}
-                          <span className="detail-reference-link">원문</span>
-                        </a>
-                      ) : (
-                        <div key={`${ref.title}-${ref.summary}`} className="detail-reference-item detail-reference-static">
-                          <div className="detail-reference-text">
-                            <strong>{ref.title}</strong>
-                            <span>{ref.summary}</span>
-                          </div>
-                          {ref.subtitle && <span className="detail-reference-subtitle">{ref.subtitle}</span>}
-                        </div>
-                      ),
-                    )}
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <div className="detail-empty">
-                검증된 키워드를 누르면 이 영역에서 관련 법령과 판례 상세를 확인할 수 있습니다.
-              </div>
-            )}
+            <DetailPanel
+              data={selectedKeywordDetail}
+              title="키워드 상세"
+              subtitle="선택한 법령·판례 근거를 바로 펼쳐봅니다."
+              emptyMessage="검증된 키워드를 누르면 이 영역에서 관련 법령과 판례 상세를 확인할 수 있습니다."
+              onClose={() => setSelectedKeywordDetail(null)}
+              inline
+            />
           </div>
         </section>
       )}
@@ -2280,7 +2222,7 @@ export default function App() {
 
   const analyzingView = (
     <main className="analyzing-main">
-      <div className="analyzing-card analyzing-card-wide">
+      <div className="analyzing-card">
         <div className="spinner" />
         <h2 className="analyzing-title">분석 중입니다</h2>
         <p className="analyzing-sub">
@@ -2288,56 +2230,20 @@ export default function App() {
             ? '법령과 판례 provider를 조회하고 있습니다.'
             : '로컬 fixture 기반 mock 검색이라 실제 API보다 빠르게 완료될 수 있습니다.'}
         </p>
-
-        <div className="runtime-observer-grid">
-          <section className="runtime-panel">
-            <div className="runtime-panel-head">
-              <strong>런타임 상태</strong>
-              <span className={`runtime-badge runtime-badge-${RUNTIME_IS_LIVE ? 'live' : 'mock'}`}>{RUNTIME_BADGE}</span>
-            </div>
-            <p className="runtime-panel-copy">{RUNTIME_NOTICE}</p>
-            <div className="runtime-meta-grid">
-              {currentRun && (
-                <>
-                  <div className="runtime-meta-item"><span>입력 방식</span><strong>{formatInputMode(currentRun.inputMode)}</strong></div>
-                  <div className="runtime-meta-item"><span>출처</span><strong>{formatContextType(currentRun.contextType)}</strong></div>
-                  <div className="runtime-meta-item"><span>제출 시각</span><strong>{formatKoreanDateTime(currentRun.submittedAt)}</strong></div>
-                  <div className="runtime-meta-item"><span>입력 크기</span><strong>{currentRun.inputMode === 'image' ? currentRun.imageName ?? '이미지 1건' : `${currentRun.textLength}자`}</strong></div>
-                </>
-              )}
-              {activeJobId && <div className="runtime-meta-item runtime-meta-item-wide"><span>작업 ID</span><strong>{activeJobId}</strong></div>}
-            </div>
-          </section>
-
-          <section className="runtime-panel">
-            <div className="runtime-panel-head">
-              <strong>에이전트 타임라인</strong>
-              <span className="runtime-muted">{runtimeTimeline.filter((item) => item.status === 'done').length}/{runtimeTimeline.length} 완료</span>
-            </div>
-            <div className="pipeline">
-              {runtimeTimeline.map((step) => {
-                const done = step.status === 'done';
-                const active = step.status === 'active';
-                return (
-                  <div
-                    key={step.agentId}
-                    className={`pipeline-step ${done ? 'step-done' : active ? 'step-active' : 'step-waiting'}`}
-                  >
-                    <div className="step-indicator">
-                      {done ? '✓' : active ? <span className="step-dot-pulse" /> : <span className="step-dot" />}
-                    </div>
-                    <div className="step-info">
-                      <strong>{step.label}</strong>
-                      <span>{step.description}</span>
-                      <small>{done ? formatDuration(step.durationMs) : active ? '현재 실행 중' : '대기 중'}</small>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        </div>
+        <p className="runtime-panel-copy">{RUNTIME_NOTICE}</p>
       </div>
+
+      <RuntimeDashboard
+        currentRun={currentRun}
+        activeJobId={activeJobId}
+        runtimeTimeline={runtimeTimeline}
+        analysisHistory={analysisHistory}
+        historyBusy={historyBusy}
+        formatContextType={formatContextType}
+        formatInputMode={formatInputMode}
+        formatKoreanDateTime={formatKoreanDateTime}
+        formatDuration={formatDuration}
+      />
     </main>
   );
 
@@ -2684,165 +2590,13 @@ export default function App() {
 
         <div className="results-col results-col-side">
           <section className="result-section result-detail-panel" ref={detailPanelRef}>
-            <div className="detail-panel-head">
-              <div>
-                <h3 className="section-title">상세 보기</h3>
-                <p className="detail-panel-sub">
-                  카드를 누르면 법령·판례 근거와 참고 정보를 확인할 수 있습니다.
-                </p>
-              </div>
-              {selectedDetail && (
-                <div className="detail-panel-actions">
-                  <span className="detail-panel-count">
-                    {selectedDetail.references.length > 0
-                      ? `${selectedDetail.references.length}개 근거`
-                      : '카드 상세'}
-                  </span>
-                  <button className="detail-close-btn" type="button" onClick={() => setSelectedDetail(null)}>
-                    닫기
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {selectedDetail ? (
-              <div className="detail-panel-body">
-                <div className="detail-panel-kicker">{selectedDetail.eyebrow}</div>
-                <h4 className="detail-panel-title">{selectedDetail.title}</h4>
-                <p className="detail-panel-summary">{selectedDetail.summary}</p>
-
-                {selectedDetail.metadata.length > 0 && (
-                  <div className="detail-metadata">
-                    {selectedDetail.metadata.map((meta) => (
-                      <div key={`${meta.label}-${meta.value}`} className="detail-metadata-item">
-                        <span>{meta.label}</span>
-                        <strong>{meta.value}</strong>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {selectedDetail.highlights.length > 0 && (
-                  <div className="detail-highlight-list">
-                    {selectedDetail.highlights.map((item) => (
-                      <div key={item} className="detail-highlight-item">
-                        <span className="detail-highlight-dot" />
-                        <span>{item}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {selectedDetail.provenance && (
-                  <div className="detail-provenance">
-                    <div className="detail-provenance-head">
-                      <strong>근거 연결</strong>
-                      {selectedDetail.provenance.citationId && (
-                        <span>{selectedDetail.provenance.citationId}</span>
-                      )}
-                    </div>
-
-                    {(selectedDetail.provenance.referenceKey ||
-                      selectedDetail.provenance.lawReferenceId ||
-                      selectedDetail.provenance.referenceId ||
-                      selectedDetail.provenance.precedentReferenceIds.length > 0) && (
-                      <div className="detail-provenance-grid">
-                        {selectedDetail.provenance.referenceKey && (
-                          <div>
-                            <span>참조 키</span>
-                            <strong>{selectedDetail.provenance.referenceKey}</strong>
-                          </div>
-                        )}
-                        {selectedDetail.provenance.lawReferenceId && (
-                          <div>
-                            <span>법령 근거</span>
-                            <strong>{selectedDetail.provenance.lawReferenceId}</strong>
-                          </div>
-                        )}
-                        {selectedDetail.provenance.referenceId && (
-                          <div>
-                            <span>판례 근거</span>
-                            <strong>{selectedDetail.provenance.referenceId}</strong>
-                          </div>
-                        )}
-                        {selectedDetail.provenance.precedentReferenceIds.length > 0 && (
-                          <div>
-                            <span>연결 판례</span>
-                            <strong>{selectedDetail.provenance.precedentReferenceIds.join(', ')}</strong>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {selectedDetail.provenance.matchReason && (
-                      <p className="detail-provenance-reason">{selectedDetail.provenance.matchReason}</p>
-                    )}
-
-                    {selectedDetail.provenance.snippetText && (
-                      <blockquote className="detail-provenance-snippet">
-                        {selectedDetail.provenance.snippetField && (
-                          <span>{selectedDetail.provenance.snippetField}</span>
-                        )}
-                        {selectedDetail.provenance.snippetText}
-                      </blockquote>
-                    )}
-
-                    {selectedDetail.provenance.queryRefs.length > 0 && (
-                      <div className="detail-query-list">
-                        {selectedDetail.provenance.queryRefs.slice(0, 8).map((query, queryIndex) => (
-                          <span
-                            key={`${query.text}-${query.bucket}-${query.channel}-${queryIndex}`}
-                            className="detail-query-chip"
-                            title={[...query.sources, ...query.issueTypes, ...query.legalElementSignals].join(', ')}
-                          >
-                            {query.text}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {selectedDetail.references.length > 0 ? (
-                  <div className="detail-reference-list">
-                    {selectedDetail.references.map((ref) => (
-                      ref.url ? (
-                        <a
-                          key={`${ref.title}-${ref.summary}-${ref.url}`}
-                          className="detail-reference-item"
-                          href={ref.url}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          <div className="detail-reference-text">
-                            <strong>{ref.title}</strong>
-                            <span>{ref.summary}</span>
-                          </div>
-                          {ref.subtitle && <span className="detail-reference-subtitle">{ref.subtitle}</span>}
-                          <span className="detail-reference-link">원문</span>
-                        </a>
-                      ) : (
-                        <div key={`${ref.title}-${ref.summary}`} className="detail-reference-item detail-reference-static">
-                          <div className="detail-reference-text">
-                            <strong>{ref.title}</strong>
-                            <span>{ref.summary}</span>
-                          </div>
-                          {ref.subtitle && <span className="detail-reference-subtitle">{ref.subtitle}</span>}
-                        </div>
-                      )
-                    ))}
-                  </div>
-                ) : (
-                  <div className="detail-empty">
-                    참고 라이브러리가 없으면 카드의 핵심 정보만 우선 표시됩니다.
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="detail-empty">
-                카드의 <strong>상세 보기</strong>를 누르면 여기에서 판례와 근거를 확인할 수 있습니다.
-              </div>
-            )}
+            <DetailPanel
+              data={selectedDetail}
+              title="상세 보기"
+              subtitle="카드를 누르면 법령·판례 근거와 참고 정보를 확인할 수 있습니다."
+              emptyMessage="카드의 상세 보기를 누르면 여기에서 판례와 근거를 확인할 수 있습니다."
+              onClose={() => setSelectedDetail(null)}
+            />
           </section>
 
           <section className="result-section">
