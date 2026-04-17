@@ -83,6 +83,7 @@
 - `npm run orch:brief -- --task <id>` : sub-agent handoff용 brief 생성
 - `npm run orch:claim -- --task <id> [--role <role>]` : pending task를 in_progress로 claim
 - `npm run orch:update -- --task <id> --status <pending|in_progress|completed|blocked>` : task 상태 갱신
+- `npm run orch:review -- --task <id> [--write]` : reviewer checklist 생성 및 선택적으로 `docs/review-notes.md` 갱신
 - `npm run orch:validate` : task/role 정의와 파일 범위 경고 검사
 
 ## 검증 게이트

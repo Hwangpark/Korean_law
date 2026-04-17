@@ -69,15 +69,28 @@
     {
       "id": "orch-006",
       "title": "Add reviewer checklist automation",
-      "status": "pending",
+      "status": "completed",
       "owner_role": "orchestrator",
       "files": [
         "scripts/orchestrator/review-checklist.ts",
         "docs/review-notes.md",
+        "package.json",
+        "ops/tasks.json"
+      ],
+      "validation": ["npm run orch:review -- --task orch-006", "npm run orch:review -- --task orch-006 --write", "npm run orch:validate", "npm run typecheck"],
+      "notes": "Reviewer checklists can now be generated from task metadata and written to docs/review-notes.md."
+    },
+    {
+      "id": "orch-007",
+      "title": "Prepare subagent runner automation",
+      "status": "pending",
+      "owner_role": "orchestrator",
+      "files": [
+        "docs/codex-orchestration.md",
         "ops/tasks.json"
       ],
       "validation": ["npm run orch:validate", "npm run typecheck"],
-      "notes": "Generate reviewer-facing checklists from task metadata and repository guardrails."
+      "notes": "Define how the orchestrator should launch subagents from generated briefs without crossing ownership rules."
     }
   ]
 }
