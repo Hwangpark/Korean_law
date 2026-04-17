@@ -9,24 +9,36 @@ import {
   verifyEmailCode,
   evaluatePasswordPolicy,
   fetchAnalysisResult,
+  fetchHistory,
   fetchMe,
   getInitialAuthBaseUrl,
   getInitialGuestSession,
   loadStoredToken,
   login,
-    saveGuestSession,
-    saveStoredToken,
-    signup,
-    verifyKeyword,
-    type AnalyzeCaseResponse,
-    type AnalyzeJobStartResponse,
+  saveGuestSession,
+  saveStoredToken,
+  signup,
+  verifyKeyword,
+  type AnalysisHistoryItem,
+  type AnalyzeCaseResponse,
+  type AnalyzeJobStartResponse,
   type AnalysisLegalResult,
   type AnalysisReferenceItem,
-    type AuthResponse,
-    type AuthUser,
-    type GuestSession,
-    type SignupPayload,
-  } from './lib/auth';
+  type AuthResponse,
+  type AuthUser,
+  type GuestSession,
+  type SignupPayload,
+} from './lib/auth';
+import { DetailPanel } from './components/DetailPanel';
+import { RuntimeDashboard } from './components/RuntimeDashboard';
+import type {
+  AnalysisRunSnapshot,
+  DetailGrounding,
+  DetailPanelData,
+  DetailQueryRef,
+  DetailReference,
+  RuntimeTimelineItem,
+} from './types/app-ui';
 
 const AUTH_BASE_URL = getInitialAuthBaseUrl();
 const ANALYSIS_BASE_URL = import.meta.env.VITE_ANALYSIS_BASE_URL ?? AUTH_BASE_URL ?? DEFAULT_AUTH_BASE_URL;
@@ -84,6 +96,7 @@ type AnalysisResult = {
   can_sue: boolean;
   risk_level: number;
   summary: string;
+  summary_grounding?: DetailGrounding | null;
   charges: Charge[];
   recommended_actions: string[];
   evidence_to_collect: string[];
@@ -125,6 +138,8 @@ type PendingKeyword = {
   contextType: ContextType;
 };
 
+type ComposerMode = 'text' | 'image';
+
 type AnalysisStreamEvent = {
   type?: string;
   agent?: string;
@@ -133,47 +148,6 @@ type AnalysisStreamEvent = {
   result?: unknown;
   analysis?: unknown;
   message?: string;
-};
-
-type DetailReference = {
-  kind?: string;
-  title: string;
-  summary: string;
-  url?: string;
-  href?: string;
-  subtitle?: string;
-};
-
-type DetailQueryRef = {
-  text: string;
-  bucket?: string;
-  channel?: string;
-  sources: string[];
-  issueTypes: string[];
-  legalElementSignals: string[];
-};
-
-type DetailGrounding = {
-  citationId?: string;
-  lawReferenceId?: string;
-  precedentReferenceIds: string[];
-  referenceId?: string;
-  referenceKey?: string;
-  matchReason?: string;
-  snippetField?: string;
-  snippetText?: string;
-  evidenceCount?: number;
-  queryRefs: DetailQueryRef[];
-};
-
-type DetailPanelData = {
-  eyebrow: string;
-  title: string;
-  summary: string;
-  metadata: Array<{ label: string; value: string }>;
-  highlights: string[];
-  references: DetailReference[];
-  provenance?: DetailGrounding | null;
 };
 
 function normalizeProfileContext(value: unknown): UserProfileContext | null {
@@ -323,6 +297,24 @@ const CONTEXT_OPTIONS: { value: ContextType; label: string; icon: IconName; desc
   { value: 'game_chat', label: '게임 채팅', icon: 'game', desc: '인게임 채팅·메시지' },
   { value: 'messenger', label: '메신저', icon: 'messenger', desc: '카카오톡·라인 등' },
   { value: 'other', label: '기타', icon: 'document', desc: '그 외 온라인 대화' },
+];
+
+const DEMO_SCENARIOS: Array<{ title: string; contextType: ContextType; text: string }> = [
+  {
+    title: '커뮤니티 허위사실 유포',
+    contextType: 'community',
+    text: '동네 카페 게시판에 "저 사람 사기꾼이고 남의 돈 떼먹고 다닌다"는 글이 반복해서 올라왔고, 댓글로 제 실명과 직장까지 함께 적혀 퍼지고 있습니다.',
+  },
+  {
+    title: '메신저 협박',
+    contextType: 'messenger',
+    text: '상대가 카카오톡으로 "오늘 안에 돈 안 보내면 네 가족 연락처랑 사진 전부 퍼뜨리겠다"라고 말했고, 욕설과 함께 여러 차례 반복했습니다.',
+  },
+  {
+    title: '게임 채팅 모욕',
+    contextType: 'game_chat',
+    text: '게임 채팅에서 여러 명이 보는 자리에서 저를 향해 "정신병자, 인생 망한 사람, 사람도 아니다" 같은 표현을 계속 보냈고 닉네임과 길드명도 함께 언급했습니다.',
+  },
 ];
 
 const AGENT_STEPS = [
@@ -555,6 +547,37 @@ function normalizeGrounding(value: unknown): DetailGrounding | null {
   return grounding;
 }
 
+function getGroundingLead(grounding?: DetailGrounding | null) {
+  if (!grounding) {
+    return '';
+  }
+
+  return firstText(
+    grounding.matchReason,
+    grounding.snippetText,
+    grounding.queryRefs[0]?.text,
+    grounding.citationId,
+    grounding.lawReferenceId,
+    grounding.referenceId,
+  );
+}
+
+function getGroundingMeta(grounding?: DetailGrounding | null) {
+  if (!grounding) {
+    return [] as string[];
+  }
+
+  const items = [
+    grounding.citationId ? `인용 ${grounding.citationId}` : '',
+    grounding.lawReferenceId ? `법령 ${grounding.lawReferenceId}` : '',
+    grounding.referenceId ? `판례 ${grounding.referenceId}` : '',
+    grounding.precedentReferenceIds.length > 0 ? `연결 판례 ${grounding.precedentReferenceIds.length}건` : '',
+    typeof grounding.evidenceCount === 'number' ? `증거 ${grounding.evidenceCount}건` : '',
+  ].filter((item): item is string => item.length > 0);
+
+  return items.slice(0, 3);
+}
+
 function normalizeReferenceItem(value: unknown): DetailReference | null {
   if (typeof value === 'string') {
     return {
@@ -726,6 +749,16 @@ function buildReferenceDetail(
   kind: 'law' | 'precedent',
   index: number,
 ): DetailPanelData {
+  const confidenceScore =
+    typeof reference.confidence_score === 'number'
+      ? reference.confidence_score
+      : typeof reference.confidenceScore === 'number'
+        ? reference.confidenceScore
+        : null;
+  const provenance = normalizeGrounding({
+    ...reference,
+    query_refs: reference.matchedQueryRefs ?? reference.matched_query_refs,
+  });
   const title = firstText(
     reference.title,
     reference.law_name,
@@ -746,6 +779,7 @@ function buildReferenceDetail(
   const metadata = [
     { label: '유형', value: kind === 'law' ? '법령' : '판례' },
     { label: '우선순위', value: `#${index + 1}` },
+    ...(confidenceScore !== null ? [{ label: '근거 점수', value: `${Math.round(confidenceScore * 100)}%` }] : []),
   ];
 
   return {
@@ -755,7 +789,20 @@ function buildReferenceDetail(
     metadata: subtitle ? [...metadata, { label: '출처', value: subtitle }] : metadata,
     highlights: toTextList(reference.keywords ?? reference.tags),
     references: collectReferenceItems(reference),
+    provenance,
   };
+}
+
+function describeGrounding(grounding?: DetailGrounding | null) {
+  if (!grounding) {
+    return [] as string[];
+  }
+
+  return [
+    grounding.citationId ? `인용 ${grounding.citationId}` : '',
+    grounding.evidenceCount ? `증거 ${grounding.evidenceCount}건` : '',
+    grounding.queryRefs.length > 0 ? `질의 ${grounding.queryRefs.length}개` : '',
+  ].filter((item): item is string => item.length > 0);
 }
 
 function splitReferenceGroups(references: DetailReference[]) {
@@ -790,8 +837,8 @@ function normalizeAnalysisResult(
   }
 
   const mergedTopLevelReferences = collectReferenceItems(result.reference_library);
-  const mergedLawReferences = collectReferenceItems(result.law_reference_library);
-  const mergedPrecedentReferences = collectReferenceItems(result.precedent_reference_library);
+  const mergedLawReferences = collectReferenceItems(result.law_reference_library ?? result.matched_laws);
+  const mergedPrecedentReferences = collectReferenceItems(result.precedent_reference_library ?? result.matched_precedents);
   const allReferences =
     responseReferenceLibrary.length > 0
       ? responseReferenceLibrary
@@ -818,6 +865,7 @@ function normalizeAnalysisResult(
     can_sue: Boolean(result.can_sue),
     risk_level: Number(result.risk_level ?? 0),
     summary: getText(result.summary) || '분석 결과',
+    summary_grounding: normalizeGrounding((result as Record<string, unknown>).summary_grounding ?? (result as Record<string, unknown>).summaryGrounding),
     profile_guidance: normalizeProfileGuidance(
       result.profile_guidance ?? result.profile_context ?? result.user_profile,
     ),
@@ -887,8 +935,14 @@ function normalizeAnalysisResult(
       : [],
     disclaimer: getText(result.disclaimer) || '본 분석은 참고용입니다.',
     reference_library: allReferences,
-    law_reference_library: lawReferences,
-    precedent_reference_library: precedentReferences,
+    law_reference_library:
+      Array.isArray(result.matched_laws) && result.matched_laws.length > 0
+        ? result.matched_laws
+        : lawReferences,
+    precedent_reference_library:
+      Array.isArray(result.matched_precedents) && result.matched_precedents.length > 0
+        ? result.matched_precedents
+        : precedentReferences,
     profile_context: profileContext,
     profile_considerations: profileConsiderations,
   };
@@ -1028,6 +1082,38 @@ function buildAnalyzeJobPayload(
 }
 
 
+function formatContextType(value: string) {
+  return CONTEXT_OPTIONS.find((item) => item.value === value)?.label ?? value;
+}
+
+function formatInputMode(value: 'text' | 'image') {
+  return value === 'image' ? '이미지 OCR' : '텍스트 입력';
+}
+
+function formatKoreanDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('ko-KR', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function formatDuration(durationMs?: number) {
+  if (!durationMs || Number.isNaN(durationMs)) {
+    return '진행 중';
+  }
+  if (durationMs < 1000) {
+    return `${durationMs}ms`;
+  }
+  return `${(durationMs / 1000).toFixed(1)}초`;
+}
+
 function PolicyRule({ label, passed }: { label: string; passed: boolean }) {
   return (
     <li className={`policy-rule ${passed ? 'policy-rule-pass' : 'policy-rule-miss'}`}>
@@ -1039,6 +1125,7 @@ function PolicyRule({ label, passed }: { label: string; passed: boolean }) {
 
 export default function App() {
   const [view, setView] = useState<View>('input');
+  const [composerMode, setComposerMode] = useState<ComposerMode>('text');
   const [text, setText] = useState('');
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
@@ -1053,6 +1140,18 @@ export default function App() {
   const [keywordError, setKeywordError] = useState<string | null>(null);
   const [keywordLoading, setKeywordLoading] = useState(false);
   const [selectedKeywordDetail, setSelectedKeywordDetail] = useState<DetailPanelData | null>(null);
+  const [analysisHistory, setAnalysisHistory] = useState<AnalysisHistoryItem[]>([]);
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const [runtimeTimeline, setRuntimeTimeline] = useState<RuntimeTimelineItem[]>(
+    AGENT_STEPS.map((step) => ({
+      agentId: step.id,
+      label: step.label,
+      description: step.desc,
+      status: 'pending',
+    })),
+  );
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [currentRun, setCurrentRun] = useState<AnalysisRunSnapshot | null>(null);
 
   const [session, setSession] = useState<{ user: AuthUser; token: string } | null>(null);
   const [guestSession, setGuestSession] = useState<GuestSession>(() => getInitialGuestSession());
@@ -1134,6 +1233,36 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!session?.token) {
+      setAnalysisHistory([]);
+      return;
+    }
+
+    let active = true;
+    setHistoryBusy(true);
+    fetchHistory(ANALYSIS_BASE_URL, session.token)
+      .then((items) => {
+        if (active) {
+          setAnalysisHistory(items);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setAnalysisHistory([]);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setHistoryBusy(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [session?.token]);
+
+  useEffect(() => {
     setSelectedDetail(null);
   }, [result]);
 
@@ -1163,6 +1292,13 @@ export default function App() {
 
   const passwordPolicy = evaluatePasswordPolicy(authPassword);
   const canUseGuest = guestSession.guestRemaining > 0;
+  const provenanceSummary = result
+    ? [
+        result.summary_grounding?.citationId ? `요약 인용 ${result.summary_grounding.citationId}` : '',
+        result.law_reference_library?.length ? `법령 ${result.law_reference_library.length}건` : '',
+        result.precedent_reference_library?.length ? `판례 ${result.precedent_reference_library.length}건` : '',
+      ].filter((item): item is string => item.length > 0)
+    : [];
 
   function closeAnalysisStream() {
     const currentStream = analysisStreamRef.current;
@@ -1170,6 +1306,23 @@ export default function App() {
       currentStream.close();
     }
     analysisStreamRef.current = null;
+  }
+
+  function resetRuntimeTimeline() {
+    setRuntimeTimeline(
+      AGENT_STEPS.map((step) => ({
+        agentId: step.id,
+        label: step.label,
+        description: step.desc,
+        status: 'pending',
+      })),
+    );
+  }
+
+  function markTimelineStep(agentId: string, next: Partial<RuntimeTimelineItem>) {
+    setRuntimeTimeline((prev) =>
+      prev.map((step) => (step.agentId === agentId ? { ...step, ...next } : step)),
+    );
   }
 
   function syncGuestQuota(payload: Record<string, unknown>, token: string | null) {
@@ -1202,6 +1355,12 @@ export default function App() {
     setResult(mergeProfileResult(analysis, responseRecord));
     setPendingAnalysis(null);
     setView('results');
+    setAnalysisHistory((prev) => prev);
+    if (token) {
+      void fetchHistory(ANALYSIS_BASE_URL, token)
+        .then((items) => setAnalysisHistory(items))
+        .catch(() => undefined);
+    }
   }
 
   function openLoginPage(errorMessage?: string) {
@@ -1221,6 +1380,15 @@ export default function App() {
     setAnalysisError(null);
     setAgentProgress([]);
     setActiveAgentId(null);
+    setActiveJobId(null);
+    setCurrentRun({
+      inputMode: snapshot.inputMode,
+      contextType: snapshot.contextType,
+      submittedAt: new Date().toISOString(),
+      textLength: snapshot.text?.trim().length ?? 0,
+      imageName: snapshot.imageFile?.name,
+    });
+    resetRuntimeTimeline();
     setView('analyzing');
     setAuthError(null);
     closeAnalysisStream();
@@ -1235,6 +1403,7 @@ export default function App() {
       if (!jobId) {
         throw new Error('분석 작업 ID를 받지 못했습니다.');
       }
+      setActiveJobId(jobId);
 
       const streamPath =
         typeof startResponse.stream_url === 'string' && startResponse.stream_url
@@ -1287,7 +1456,9 @@ export default function App() {
           try {
             const payload = JSON.parse(event.data) as AnalysisStreamEvent;
             if (typeof payload.agent === 'string') {
+              const startedAt = typeof payload.at === 'string' ? payload.at : new Date().toISOString();
               setActiveAgentId(payload.agent);
+              markTimelineStep(payload.agent, { status: 'active', startedAt });
             }
           } catch {
             // Ignore malformed stream payloads.
@@ -1302,8 +1473,14 @@ export default function App() {
           try {
             const payload = JSON.parse(event.data) as AnalysisStreamEvent;
             if (typeof payload.agent === 'string') {
+              const finishedAt = typeof payload.at === 'string' ? payload.at : new Date().toISOString();
               setAgentProgress((prev) => (prev.includes(payload.agent as string) ? prev : [...prev, payload.agent as string]));
               setActiveAgentId((prev) => (prev === payload.agent ? null : prev));
+              markTimelineStep(payload.agent, {
+                status: 'done',
+                finishedAt,
+                durationMs: typeof payload.duration_ms === 'number' ? payload.duration_ms : undefined,
+              });
             }
           } catch {
             // Ignore malformed stream payloads.
@@ -1359,6 +1536,7 @@ export default function App() {
       const unauthorized = /unauthorized|401/i.test(message);
       closeAnalysisStream();
       setActiveAgentId(null);
+      setActiveJobId(null);
 
       if (unauthorized && token) {
         clearStoredToken();
@@ -1427,6 +1605,15 @@ export default function App() {
     }
   }
 
+  function selectComposerMode(mode: ComposerMode) {
+    setComposerMode(mode);
+    if (mode === 'text') {
+      clearImageSelection();
+      return;
+    }
+    setText('');
+  }
+
   function handleImageFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
     if (!file) {
@@ -1449,8 +1636,8 @@ export default function App() {
       return;
     }
 
-    const snapshot: PendingAnalysis = selectedImageFile
-      ? { inputMode: 'image', contextType, imageFile: selectedImageFile }
+    const snapshot: PendingAnalysis = composerMode === 'image'
+      ? { inputMode: 'image', contextType, imageFile: selectedImageFile ?? undefined }
       : { inputMode: 'text', contextType, text };
     setPendingKeyword(null);
 
@@ -1538,10 +1725,14 @@ export default function App() {
   function handleReset() {
     closeAnalysisStream();
     setText('');
+    setComposerMode('text');
     clearImageSelection();
     setResult(null);
     setAgentProgress([]);
     setActiveAgentId(null);
+    setActiveJobId(null);
+    setCurrentRun(null);
+    resetRuntimeTimeline();
     setAnalysisError(null);
     setSelectedDetail(null);
     setKeywordResult(null);
@@ -1713,6 +1904,23 @@ export default function App() {
           <br />
           명예훼손·협박·모욕 등 법적 쟁점과 관련 법령·판례를 분석해드립니다.
         </p>
+        <div className="demo-scenario-row">
+          {DEMO_SCENARIOS.map((scenario) => (
+            <button
+              key={scenario.title}
+              type="button"
+              className="demo-scenario-chip"
+              onClick={() => {
+                setContextType(scenario.contextType);
+                setComposerMode('text');
+                setText(scenario.text);
+                clearImageSelection();
+              }}
+            >
+              {scenario.title}
+            </button>
+          ))}
+        </div>
       </section>
 
       <div className="input-card">
@@ -1733,21 +1941,48 @@ export default function App() {
         </div>
 
         <div className="section-label" style={{ marginTop: '24px' }}>
-          분석할 내용 <span className="label-required">*</span>
+          분석 입력 방식 <span className="label-required">*</span>
         </div>
-        <textarea
-          className="text-input"
-          placeholder={`상대방이 한 말, 게시글 내용, 대화 내용을 그대로 붙여넣어 주세요.\n\n예: "너 사기꾼인 거 다 퍼뜨리겠다. 네 신상이랑 전화번호 올려버릴 거야."`}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={7}
-        />
-        <div className="char-count">{text.length}자</div>
+        <div className="composer-mode-row">
+          <button
+            type="button"
+            className={`composer-mode-btn ${composerMode === 'text' ? 'composer-mode-btn-active' : ''}`}
+            onClick={() => selectComposerMode('text')}
+          >
+            텍스트 직접 입력
+          </button>
+          <button
+            type="button"
+            className={`composer-mode-btn ${composerMode === 'image' ? 'composer-mode-btn-active' : ''}`}
+            onClick={() => selectComposerMode('image')}
+          >
+            캡처 이미지 OCR
+          </button>
+        </div>
+        <p className="composer-mode-note">
+          한 번에 한 가지 입력만 받습니다. 텍스트 분석과 이미지 OCR을 분리해서 어떤 경로로 처리되는지 더 명확하게 보여줍니다.
+        </p>
 
-        <div className="section-label" style={{ marginTop: '24px' }}>
-          이미지 업로드
-        </div>
-        <div className="image-upload-block">
+        {composerMode === 'text' ? (
+          <>
+            <div className="section-label" style={{ marginTop: '20px' }}>
+              분석할 내용 <span className="label-required">*</span>
+            </div>
+            <textarea
+              className="text-input"
+              placeholder={`상대방이 한 말, 게시글 내용, 대화 내용을 그대로 붙여넣어 주세요.\n\n예: "너 사기꾼인 거 다 퍼뜨리겠다. 네 신상이랑 전화번호 올려버릴 거야."`}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              rows={7}
+            />
+            <div className="char-count">{text.length}자</div>
+          </>
+        ) : (
+          <>
+            <div className="section-label" style={{ marginTop: '20px' }}>
+              이미지 업로드 <span className="label-required">*</span>
+            </div>
+            <div className="image-upload-block">
           <input
             ref={imageInputRef}
             id="case-image-upload"
@@ -1766,7 +2001,7 @@ export default function App() {
             </span>
           </label>
           <p className="keyword-note" style={{ marginTop: 0 }}>
-            이미지를 선택하면 OCR 분석 경로로 전송됩니다. 텍스트가 입력되어 있어도 이미지 모드가 우선됩니다.
+            대화 캡처를 올리면 OCR 추출 후 법적 쟁점 분석으로 이어집니다. 민감 정보는 서버 측 마스킹 규칙을 거칩니다.
           </p>
           {selectedImageFile && (
             <div className="image-file-card">
@@ -1784,16 +2019,18 @@ export default function App() {
           )}
           {imageError && <div className="error-banner">{imageError}</div>}
         </div>
+          </>
+        )}
 
         {analysisError && <div className="error-banner">{analysisError}</div>}
 
         <button
           className="analyze-btn"
           onClick={() => void handleAnalyzeClick()}
-          disabled={!text.trim() && !selectedImageFile}
+          disabled={composerMode === 'image' ? !selectedImageFile : !text.trim()}
           type="button"
         >
-          {selectedImageFile ? '이미지 업로드 분석 시작' : '법적 분석 시작'}
+          {composerMode === 'image' ? '이미지 업로드 분석 시작' : '법적 분석 시작'}
           <span className="analyze-arrow">→</span>
         </button>
 
@@ -2043,7 +2280,7 @@ export default function App() {
 
   const analyzingView = (
     <main className="analyzing-main">
-      <div className="analyzing-card">
+      <div className="analyzing-card analyzing-card-wide">
         <div className="spinner" />
         <h2 className="analyzing-title">분석 중입니다</h2>
         <p className="analyzing-sub">
@@ -2052,25 +2289,53 @@ export default function App() {
             : '로컬 fixture 기반 mock 검색이라 실제 API보다 빠르게 완료될 수 있습니다.'}
         </p>
 
-        <div className="pipeline">
-          {AGENT_STEPS.map((step) => {
-            const done = agentProgress.includes(step.id);
-            const active = !done && activeAgentId === step.id;
-            return (
-              <div
-                key={step.id}
-                className={`pipeline-step ${done ? 'step-done' : active ? 'step-active' : 'step-waiting'}`}
-              >
-                <div className="step-indicator">
-                  {done ? '✓' : active ? <span className="step-dot-pulse" /> : <span className="step-dot" />}
-                </div>
-                <div className="step-info">
-                  <strong>{step.label}</strong>
-                  <span>{step.desc}</span>
-                </div>
-              </div>
-            );
-          })}
+        <div className="runtime-observer-grid">
+          <section className="runtime-panel">
+            <div className="runtime-panel-head">
+              <strong>런타임 상태</strong>
+              <span className={`runtime-badge runtime-badge-${RUNTIME_IS_LIVE ? 'live' : 'mock'}`}>{RUNTIME_BADGE}</span>
+            </div>
+            <p className="runtime-panel-copy">{RUNTIME_NOTICE}</p>
+            <div className="runtime-meta-grid">
+              {currentRun && (
+                <>
+                  <div className="runtime-meta-item"><span>입력 방식</span><strong>{formatInputMode(currentRun.inputMode)}</strong></div>
+                  <div className="runtime-meta-item"><span>출처</span><strong>{formatContextType(currentRun.contextType)}</strong></div>
+                  <div className="runtime-meta-item"><span>제출 시각</span><strong>{formatKoreanDateTime(currentRun.submittedAt)}</strong></div>
+                  <div className="runtime-meta-item"><span>입력 크기</span><strong>{currentRun.inputMode === 'image' ? currentRun.imageName ?? '이미지 1건' : `${currentRun.textLength}자`}</strong></div>
+                </>
+              )}
+              {activeJobId && <div className="runtime-meta-item runtime-meta-item-wide"><span>작업 ID</span><strong>{activeJobId}</strong></div>}
+            </div>
+          </section>
+
+          <section className="runtime-panel">
+            <div className="runtime-panel-head">
+              <strong>에이전트 타임라인</strong>
+              <span className="runtime-muted">{runtimeTimeline.filter((item) => item.status === 'done').length}/{runtimeTimeline.length} 완료</span>
+            </div>
+            <div className="pipeline">
+              {runtimeTimeline.map((step) => {
+                const done = step.status === 'done';
+                const active = step.status === 'active';
+                return (
+                  <div
+                    key={step.agentId}
+                    className={`pipeline-step ${done ? 'step-done' : active ? 'step-active' : 'step-waiting'}`}
+                  >
+                    <div className="step-indicator">
+                      {done ? '✓' : active ? <span className="step-dot-pulse" /> : <span className="step-dot" />}
+                    </div>
+                    <div className="step-info">
+                      <strong>{step.label}</strong>
+                      <span>{step.description}</span>
+                      <small>{done ? formatDuration(step.durationMs) : active ? '현재 실행 중' : '대기 중'}</small>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
         </div>
       </div>
     </main>
@@ -2088,12 +2353,144 @@ export default function App() {
                 ? '형사 고소 또는 민사 손해배상을 검토해볼 수 있습니다.'
                 : '현재 입력 기준으로 명확한 법적 쟁점이 식별되지 않았습니다.'}
             </p>
+            {provenanceSummary.length > 0 && (
+              <div className="provenance-chip-row">
+                {provenanceSummary.map((item) => (
+                  <span key={item} className="provenance-chip">
+                    {item}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
         <div className={`can-sue-badge ${result.can_sue ? 'sue-yes' : 'sue-no'}`}>
           {result.can_sue ? '고소 가능' : '고소 어려움'}
         </div>
       </div>
+
+      {result.summary_grounding && (
+        <section className="result-section grounding-summary-section">
+          <div className="grounding-summary-head">
+            <div>
+              <h3 className="section-title">분석 근거 요약</h3>
+              <p className="grounding-summary-sub">이번 판단이 어떤 법령, 판례, 질의 신호에 연결됐는지 바로 보여줍니다.</p>
+            </div>
+            <button
+              className="card-detail-btn"
+              type="button"
+              onClick={() => setSelectedDetail(buildDetailPanelData(
+                '요약 판단 근거',
+                '종합 판단 근거',
+                result.summary,
+                [
+                  { label: '판단', value: result.can_sue ? '고소 가능' : '고소 어려움' },
+                  { label: '위험도', value: `Lv.${result.risk_level}` },
+                ],
+                result.summary_grounding?.queryRefs.map((query) => query.text) ?? [],
+                {
+                  reference_library: result.reference_library,
+                  law_reference_library: result.law_reference_library,
+                  precedent_reference_library: result.precedent_reference_library,
+                },
+                result.summary_grounding,
+              ))}
+            >
+              근거 상세 보기
+            </button>
+          </div>
+
+          <div className="grounding-summary-card">
+            <div className="grounding-summary-copy">
+              <strong>{getGroundingLead(result.summary_grounding) || '종합 판단과 연결된 근거가 있습니다.'}</strong>
+              {result.summary_grounding.snippetText && (
+                <blockquote className="detail-provenance-snippet grounding-summary-snippet">
+                  {result.summary_grounding.snippetField && <span>{result.summary_grounding.snippetField}</span>}
+                  {result.summary_grounding.snippetText}
+                </blockquote>
+              )}
+            </div>
+            <div className="grounding-summary-meta">
+              {getGroundingMeta(result.summary_grounding).map((item) => (
+                <span key={item} className="grounding-meta-pill">{item}</span>
+              ))}
+              {result.summary_grounding.queryRefs.slice(0, 4).map((query, index) => (
+                <span key={`${query.text}-${index}`} className="detail-query-chip">{query.text}</span>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {result.summary_grounding && (
+        <section className="result-section provenance-overview-section">
+          <div className="provenance-overview-head">
+            <div>
+              <h3 className="section-title">분석 근거 요약</h3>
+              <p className="detail-panel-sub">요약 문장이 어떤 인용과 검색 근거를 바탕으로 만들어졌는지 빠르게 보여줍니다.</p>
+            </div>
+            <button
+              className="card-detail-btn"
+              type="button"
+              onClick={() =>
+                setSelectedDetail(
+                  buildDetailPanelData(
+                    '분석 요약 근거',
+                    '최종 분석 요약',
+                    result.summary,
+                    [
+                      { label: '법령 근거', value: String(result.law_reference_library?.length ?? 0) },
+                      { label: '판례 근거', value: String(result.precedent_reference_library?.length ?? 0) },
+                    ],
+                    provenanceSummary,
+                    {
+                      reference_library: result.reference_library,
+                      law_reference_library: result.law_reference_library,
+                      precedent_reference_library: result.precedent_reference_library,
+                    },
+                    result.summary_grounding,
+                  ),
+                )
+              }
+            >
+              상세 보기
+            </button>
+          </div>
+          <div className="provenance-chip-row">
+            {describeGrounding(result.summary_grounding).map((item) => (
+              <span key={item} className="provenance-chip provenance-chip-strong">{item}</span>
+            ))}
+            {result.summary_grounding.matchReason && (
+              <span className="provenance-inline-copy">{result.summary_grounding.matchReason}</span>
+            )}
+          </div>
+          {result.summary_grounding.snippetText && (
+            <blockquote className="detail-provenance-snippet provenance-overview-snippet">
+              {result.summary_grounding.snippetField && <span>{result.summary_grounding.snippetField}</span>}
+              {result.summary_grounding.snippetText}
+            </blockquote>
+          )}
+        </section>
+      )}
+
+      {currentRun && (
+        <section className="result-section runtime-recap-section">
+          <div className="runtime-panel-head">
+            <div>
+              <h3 className="section-title">이번 실행 정보</h3>
+              <p className="detail-panel-sub">어떤 입력 경로와 런타임으로 분석했는지 다시 확인할 수 있습니다.</p>
+            </div>
+            <span className={`runtime-badge runtime-badge-${RUNTIME_IS_LIVE ? 'live' : 'mock'}`}>{RUNTIME_BADGE}</span>
+          </div>
+          <div className="runtime-meta-grid">
+            <div className="runtime-meta-item"><span>입력 방식</span><strong>{formatInputMode(currentRun.inputMode)}</strong></div>
+            <div className="runtime-meta-item"><span>출처</span><strong>{formatContextType(currentRun.contextType)}</strong></div>
+            <div className="runtime-meta-item"><span>분석 시작</span><strong>{formatKoreanDateTime(currentRun.submittedAt)}</strong></div>
+            <div className="runtime-meta-item"><span>입력 요약</span><strong>{currentRun.inputMode === 'image' ? currentRun.imageName ?? '이미지 1건' : `${currentRun.textLength}자 텍스트`}</strong></div>
+            <div className="runtime-meta-item runtime-meta-item-wide"><span>타임라인</span><strong>{runtimeTimeline.filter((item) => item.status === 'done').length}단계 완료, {runtimeTimeline.find((item) => item.status === 'active')?.label ?? '모든 단계 종료'}</strong></div>
+          </div>
+        </section>
+      )}
 
       {(result.profile_context || (result.profile_considerations?.length ?? 0) > 0) && (
         <section className="result-section">
@@ -2202,6 +2599,17 @@ export default function App() {
                       </button>
                     </div>
                     <div className="charge-basis">{charge.basis}</div>
+                    {charge.grounding && (
+                      <div className="grounding-inline-card">
+                        <strong>근거 연결</strong>
+                        <p>{getGroundingLead(charge.grounding) || '관련 법령·판례 근거와 연결되었습니다.'}</p>
+                        <div className="grounding-inline-meta">
+                          {getGroundingMeta(charge.grounding).map((item) => (
+                            <span key={item} className="grounding-meta-pill">{item}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {charge.expected_penalty && (
                       <div className="charge-penalty">
                         <span className="penalty-label">예상 처벌</span>
@@ -2247,6 +2655,17 @@ export default function App() {
                       </button>
                     </div>
                     {p.summary && <p className="precedent-summary">{p.summary}</p>}
+                    {p.grounding && (
+                      <div className="grounding-inline-card grounding-inline-card-precedent">
+                        <strong>매칭 근거</strong>
+                        <p>{getGroundingLead(p.grounding) || '이 판례가 현재 사안과 연결된 이유가 있습니다.'}</p>
+                        <div className="grounding-inline-meta">
+                          {getGroundingMeta(p.grounding).map((item) => (
+                            <span key={item} className="grounding-meta-pill">{item}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {p.similarity_score > 0 && (
                       <div className="similarity">
                         유사도
@@ -2452,6 +2871,34 @@ export default function App() {
                     {ev}
                   </div>
                 ))}
+              </div>
+            </section>
+          )}
+
+          {session && (
+            <section className="result-section">
+              <div className="runtime-panel-head">
+                <div>
+                  <h3 className="section-title">최근 분석 기록</h3>
+                  <p className="detail-panel-sub">백엔드에 저장된 내 최근 분석 요약입니다.</p>
+                </div>
+                <span className="runtime-muted">{historyBusy ? '불러오는 중...' : `${analysisHistory.length}건`}</span>
+              </div>
+              <div className="history-list">
+                {analysisHistory.length > 0 ? analysisHistory.slice(0, 6).map((item) => (
+                  <div key={`${item.caseId}-${item.createdAt}`} className="history-card">
+                    <div className="history-card-top">
+                      <strong>{item.title}</strong>
+                      <span>{formatKoreanDateTime(item.createdAt)}</span>
+                    </div>
+                    <p>{item.summary}</p>
+                    <div className="provenance-chip-row provenance-chip-row-tight">
+                      <span className="provenance-chip">{formatContextType(item.contextType as ContextType)}</span>
+                      <span className="provenance-chip">위험도 Lv.{item.riskLevel}</span>
+                      <span className="provenance-chip">{item.canSue ? '고소 가능' : '고소 어려움'}</span>
+                    </div>
+                  </div>
+                )) : <div className="detail-empty">저장된 분석 기록이 아직 없습니다.</div>}
               </div>
             </section>
           )}
