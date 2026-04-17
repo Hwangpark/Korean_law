@@ -1,3 +1,4 @@
+import { sanitizePublicProfileContext } from "./profile-context.js";
 import type { ReferenceLibraryItem } from "./references.js";
 
 const PHONE_NUMBER_PATTERN =
@@ -202,6 +203,36 @@ function sanitizePublicSearchStageResult(
   };
 }
 
+function sanitizeVerifier(value: unknown): Record<string, unknown> {
+  const record = asRecord(value);
+  const confidence = asRecord(record.confidence_calibration);
+  return {
+    stage: asString(record.stage),
+    status: asString(record.status),
+    evidence_sufficient: asBoolean(record.evidence_sufficient),
+    citation_integrity: asBoolean(record.citation_integrity),
+    contradiction_detected: asBoolean(record.contradiction_detected),
+    selected_reference_count: asNumber(record.selected_reference_count),
+    issue_count: asNumber(record.issue_count),
+    confidence_calibration: {
+      score: asNumber(confidence.score),
+      label: asString(confidence.label)
+    },
+    warnings: sanitizeStringArray(record.warnings)
+  };
+}
+
+function sanitizeSafetyGate(value: unknown): Record<string, unknown> {
+  const record = asRecord(value);
+  return {
+    stage: asString(record.stage),
+    status: asString(record.status),
+    adjusted_output: asBoolean(record.adjusted_output),
+    blocked_reasons: sanitizeStringArray(record.blocked_reasons),
+    warnings: sanitizeStringArray(record.warnings)
+  };
+}
+
 function sanitizeTimeline(timeline: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(timeline)) {
     return [];
@@ -217,7 +248,10 @@ function sanitizeTimeline(timeline: unknown): Array<Record<string, unknown>> {
         agent: entry.agent,
         at: entry.at,
         ...(typeof entry.duration_ms === "number" ? { duration_ms: entry.duration_ms } : {}),
-        ...(Array.isArray(summary.logical_substeps) || typeof summary.evidence_strength === "string"
+        ...(Array.isArray(summary.logical_substeps)
+          || typeof summary.evidence_strength === "string"
+          || Boolean(summary.verifier)
+          || Boolean(summary.safety_gate)
           ? {
               summary: {
                 ...(Array.isArray(summary.logical_substeps)
@@ -232,6 +266,8 @@ function sanitizeTimeline(timeline: unknown): Array<Record<string, unknown>> {
                 ...(Array.isArray(summary.selected_reference_ids)
                   ? { selected_reference_ids: sanitizeStringArray(summary.selected_reference_ids) }
                   : {}),
+                ...(summary.verifier ? { verifier: sanitizeVerifier(summary.verifier) } : {}),
+                ...(summary.safety_gate ? { safety_gate: sanitizeSafetyGate(summary.safety_gate) } : {}),
                 ...(summary.scope_flags
                   ? {
                       scope_flags: {
@@ -371,6 +407,50 @@ function sanitizeGroundingEvidenceSummary(value: unknown): Record<string, unknow
   };
 }
 
+function sanitizeCitationMap(value: unknown): Record<string, unknown> | null {
+  const record = asRecord(value);
+  const citations = Array.isArray(record.citations)
+    ? record.citations
+      .map((item) => asRecord(item))
+      .map((item) => ({
+        citation_id: asString(item.citation_id),
+        reference_id: asString(item.reference_id),
+        reference_key: asString(item.reference_key),
+        kind: asString(item.kind),
+        statement_type: asString(item.statement_type),
+        statement_path: asString(item.statement_path),
+        title: asString(item.title),
+        confidence_score: asNumber(item.confidence_score),
+        match_reason: asString(item.match_reason),
+        matched_issue_types: sanitizeStringArray(item.matched_issue_types),
+        query_refs: sanitizeQueryRefList(item.query_refs),
+        query_source_tags: sanitizeStringArray(item.query_source_tags),
+        snippet: sanitizeEvidenceSnippet(item.snippet)
+      }))
+      .filter((item) => item.citation_id)
+    : [];
+
+  if (!asString(record.version) && citations.length === 0) {
+    return null;
+  }
+
+  const sanitizeIndex = (input: unknown): Record<string, string[]> => {
+    const source = asRecord(input);
+    return Object.fromEntries(
+      Object.entries(source)
+        .map(([key, entry]) => [asString(key), sanitizeStringArray(entry)] as const)
+        .filter(([key]) => Boolean(key))
+    );
+  };
+
+  return {
+    version: asString(record.version),
+    citations,
+    by_reference_id: sanitizeIndex(record.by_reference_id),
+    by_statement_path: sanitizeIndex(record.by_statement_path)
+  };
+}
+
 function sanitizePublicLegalAnalysis(value: unknown): Record<string, unknown> {
   const record = asRecord(value);
 
@@ -389,8 +469,11 @@ function sanitizePublicLegalAnalysis(value: unknown): Record<string, unknown> {
     next_steps: sanitizeStringArray(record.next_steps),
     profile_considerations: sanitizeStringArray(record.profile_considerations),
     scope_assessment: sanitizeScopeAssessment(record.scope_assessment),
+    verifier: sanitizeVerifier(record.verifier),
+    safety_gate: sanitizeSafetyGate(record.safety_gate),
     grounding_evidence: sanitizeGroundingEvidenceSummary(record.grounding_evidence),
     selected_reference_ids: sanitizeStringArray(record.selected_reference_ids),
+    citation_map: sanitizeCitationMap(record.citation_map),
     share_text: asString(record.share_text)
   };
 }
@@ -407,6 +490,8 @@ function sanitizeStoredLegalAnalysis(value: unknown): Record<string, unknown> {
     recommended_actions: publicShape.recommended_actions,
     evidence_to_collect: publicShape.evidence_to_collect,
     scope_assessment: publicShape.scope_assessment,
+    verifier: publicShape.verifier,
+    safety_gate: publicShape.safety_gate,
     grounding_evidence: publicShape.grounding_evidence,
     selected_reference_ids: publicShape.selected_reference_ids,
     share_text: publicShape.share_text
@@ -575,7 +660,7 @@ export function buildPublicAnalysisResult(
 ): PublicAnalysisResult {
   const meta = asRecord(result.meta);
   const legalAnalysis = asRecord(result.legal_analysis);
-  const profileContext = asRecord(legalAnalysis.profile_context);
+  const profileContext = sanitizePublicProfileContext(legalAnalysis.profile_context as Record<string, unknown> | null | undefined);
 
   return {
     job_id: jobId,
@@ -598,6 +683,6 @@ export function buildPublicAnalysisResult(
     timeline: sanitizeTimeline(result.timeline),
     ...(persisted?.caseId ? { case_id: persisted.caseId } : {}),
     ...(persisted?.runId ? { run_id: persisted.runId } : {}),
-    ...(Object.keys(profileContext).length > 0 ? { profile_context: profileContext } : {})
+    ...(profileContext ? { profile_context: profileContext } : {})
   };
 }

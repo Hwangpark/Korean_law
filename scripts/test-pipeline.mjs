@@ -23,7 +23,10 @@ async function main() {
   assert.ok(textResult.law_search.laws.length >= 2, "text fixture should map to laws");
   assert.ok(textResult.legal_analysis.disclaimer.includes("법적 효력"), "legal analysis should include disclaimer");
   assert.ok(Array.isArray(textResult.legal_analysis.issue_cards), "legal analysis should include formatted cards");
+  assert.ok(textResult.verifier, "analysis result should expose pre-analysis verifier output");
   assert.ok(textResult.legal_analysis.scope_assessment, "legal analysis should expose scope assessment");
+  assert.ok(textResult.legal_analysis.verifier, "legal analysis should retain verifier snapshot");
+  assert.ok(textResult.legal_analysis.safety_gate, "legal analysis should expose safety gate output");
   assert.ok(textResult.legal_analysis.grounding_evidence, "legal analysis should expose grounding evidence");
   assert.ok(Array.isArray(textResult.legal_analysis.selected_reference_ids), "legal analysis should expose selected reference ids");
   assert.ok(textResult.legal_analysis.decision_axis, "legal analysis should expose aligned decision axis");
@@ -91,9 +94,11 @@ async function main() {
   );
   assert.deepEqual(
     analysisEvent?.summary?.logical_substeps,
-    ["evidence_rerank", "evidence_pack_builder", "grounded_analysis"],
+    ["evidence_rerank", "evidence_pack_builder", "pre_analysis_verifier", "grounded_analysis", "pre_output_safety_gate"],
     "analysis timeline should expose logical substeps"
   );
+  assert.ok(analysisEvent?.summary?.verifier, "analysis timeline should include verifier summary");
+  assert.ok(analysisEvent?.summary?.safety_gate, "analysis timeline should include safety gate summary");
   assert.ok(imageResult.law_search.retrieval_preview, "law search should expose a preview");
   assert.ok(imageResult.precedent_search.retrieval_preview, "precedent search should expose a preview");
 

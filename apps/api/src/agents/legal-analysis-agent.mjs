@@ -13,6 +13,7 @@ import {
   getNormalizedLegalElements
 } from "../analysis/analysis-normalization.mjs";
 import { buildJudgmentCore } from "../analysis/judgment-core.mjs";
+import { buildPreAnalysisVerifier } from "../analysis/verifier.mjs";
 
 function unique(values) {
   return [...new Set((values ?? []).filter(Boolean))];
@@ -553,6 +554,13 @@ export async function runLegalAnalysisAgent(
       lawSearchResult,
       precedentSearchResult
     );
+  const verifier = options.verifier ?? buildPreAnalysisVerifier({
+    classificationResult,
+    retrievalPlan,
+    retrievalEvidencePack: options.retrievalEvidencePack,
+    scopeAssessment,
+    evidencePack
+  });
   const charges = buildCharges(classificationResult, retrievalPlan, evidencePack, scopeAssessment);
   const precedentCards = buildPrecedentCards(evidencePack);
   const summary = buildSummary(issueCandidates, charges, evidencePack, scopeAssessment, facts);
@@ -603,6 +611,7 @@ export async function runLegalAnalysisAgent(
     facts_snapshot: facts,
     decision_axis: judgment.decision_axis,
     scope_assessment: judgment.scope_assessment,
+    verifier,
     grounding_evidence: evidencePack,
     citation_map: citationMap,
     selected_reference_ids: selectedReferenceIds,

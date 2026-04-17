@@ -13,6 +13,10 @@ import {
   buildPrecedentVerificationCards,
   buildRetrievalEvidencePack
 } from "../retrieval/verification.js";
+import { buildScopeAssessment } from "../analysis/evidence.mjs";
+import { buildGroundingEvidenceFromRetrievalPack } from "../analysis/evidence.mjs";
+import { buildPreAnalysisVerifier } from "../analysis/verifier.mjs";
+import { applyPreOutputSafetyGate } from "../analysis/safety-gate.mjs";
 
 function emitTimelineEvent(timeline, event, onEvent) {
   timeline.push(event);
@@ -143,7 +147,17 @@ export async function runAnalysis(request, options = {}) {
     referenceLibraryItems: referenceLibrary
   });
 
-  const legalAnalysis = await runStage(
+  const scopeAssessment = buildScopeAssessment(classification, retrievalPlan);
+  const groundingEvidence = buildGroundingEvidenceFromRetrievalPack(retrievalEvidencePack);
+  const verifier = buildPreAnalysisVerifier({
+    classificationResult: classification,
+    retrievalPlan,
+    retrievalEvidencePack,
+    scopeAssessment,
+    evidencePack: groundingEvidence
+  });
+
+  const legalAnalysisDraft = await runStage(
     timeline,
     "analysis",
     () => runLegalAnalysisAgent(classification, lawSearch, precedentSearch, {
@@ -152,18 +166,25 @@ export async function runAnalysis(request, options = {}) {
       profileContext: userContext ?? undefined,
       retrievalPlan,
       retrievalEvidencePack,
+      verifier,
       request,
       ocr
     }),
     onEvent
   );
+  const { legalAnalysis, safetyGate } = applyPreOutputSafetyGate(legalAnalysisDraft, {
+    verifier,
+    scopeAssessment
+  });
   if (legalAnalysis?.citation_map) {
     retrievalEvidencePack.citation_map = legalAnalysis.citation_map;
   }
   annotateLastAgentDone(timeline, "analysis", {
-    logical_substeps: ["evidence_rerank", "evidence_pack_builder", "grounded_analysis"],
+    logical_substeps: ["evidence_rerank", "evidence_pack_builder", "pre_analysis_verifier", "grounded_analysis", "pre_output_safety_gate"],
     evidence_strength: retrievalEvidencePack.evidence_strength,
-    selected_reference_ids: retrievalEvidencePack.selected_reference_ids
+    selected_reference_ids: retrievalEvidencePack.selected_reference_ids,
+    verifier,
+    safety_gate: safetyGate
   }, onEvent);
 
   return {
@@ -182,6 +203,7 @@ export async function runAnalysis(request, options = {}) {
     law_search: lawSearch,
     precedent_search: precedentSearch,
     retrieval_evidence_pack: retrievalEvidencePack,
+    verifier,
     legal_analysis: legalAnalysis
   };
 }
