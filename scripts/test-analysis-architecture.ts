@@ -16,6 +16,8 @@ import {
   buildStoredAnalysisResult,
   buildStoredRuntimeArtifacts
 } from "../apps/api/src/analysis/privacy.js";
+import { applyPreOutputSafetyGate } from "../apps/api/src/analysis/safety-gate.mjs";
+import { buildPreAnalysisVerifier } from "../apps/api/src/analysis/verifier.mjs";
 import type { AnalysisStore, GuestUsageIdentity, GuestUsageResult } from "../apps/api/src/analysis/store.js";
 import type { AuthConfig } from "../apps/api/src/auth/config.js";
 import type { AuthService } from "../apps/api/src/auth/service.js";
@@ -224,6 +226,27 @@ function createMockKeywordService(): KeywordVerificationService {
           procedural_heavy: false,
           insufficient_facts: false,
           unsupported_issue_present: false,
+          warnings: []
+        },
+        verifier: {
+          stage: "pre_analysis_verifier",
+          status: "passed",
+          evidence_sufficient: true,
+          citation_integrity: true,
+          contradiction_detected: false,
+          selected_reference_count: 1,
+          issue_count: 1,
+          confidence_calibration: {
+            score: 0.62,
+            label: "medium"
+          },
+          warnings: []
+        },
+        safety_gate: {
+          stage: "pre_output_safety_gate",
+          status: "passed",
+          adjusted_output: false,
+          blocked_reasons: [],
           warnings: []
         },
         grounding_evidence: {
@@ -551,6 +574,103 @@ async function verifyRetrievalToolGuestQuotaIgnoresForgedForwardedFor(): Promise
   );
 }
 
+function verifyVerifierAndSafetyGateContracts(): void {
+  const verifier = buildPreAnalysisVerifier({
+    classificationResult: {
+      supported_issues: []
+    },
+    retrievalPlan: {
+      candidateIssues: [{ type: "스토킹" }]
+    },
+    retrievalEvidencePack: {
+      selected_reference_ids: [],
+      evidence_strength: "low",
+      citation_map: {
+        citations: [
+          {
+            reference_id: "law:test"
+          }
+        ]
+      }
+    },
+    scopeAssessment: {
+      unsupported_issue_present: true,
+      insufficient_facts: true,
+      procedural_heavy: false
+    },
+    evidencePack: {
+      evidence_strength: "low"
+    }
+  });
+
+  assert.deepEqual(
+    verifier,
+    {
+      stage: "pre_analysis_verifier",
+      status: "needs_caution",
+      evidence_sufficient: false,
+      citation_integrity: false,
+      contradiction_detected: true,
+      confidence_calibration: {
+        score: 0.1,
+        label: "low"
+      },
+      selected_reference_count: 0,
+      issue_count: 1,
+      warnings: [
+        "현재 근거만으로는 강한 결론을 내리기 어렵습니다.",
+        "근거 인용 연결이 완전하지 않아 출력 표현을 보수적으로 유지해야 합니다.",
+        "지원 범위 밖 이슈와 내부 쟁점 가설 사이에 충돌 가능성이 있습니다."
+      ]
+    },
+    "pre-analysis verifier should flag low-evidence, broken-citation contradictions conservatively"
+  );
+
+  const gated = applyPreOutputSafetyGate(
+    {
+      can_sue: true,
+      risk_level: 4,
+      summary: "단정적 표현이 남아 있습니다.",
+      recommended_actions: ["증거를 정리하세요."]
+    },
+    {
+      verifier,
+      scopeAssessment: {
+        unsupported_issue_present: true,
+        insufficient_facts: true,
+        procedural_heavy: false
+      }
+    }
+  );
+
+  assert.equal(gated.legalAnalysis.can_sue, false, "safety gate should downgrade can_sue when verifier needs caution");
+  assert.match(
+    String(gated.legalAnalysis.summary),
+    /^현재 확보된 근거 기준 참고용 판단입니다\./,
+    "safety gate should prefix cautious wording when confidence is low"
+  );
+  assert.ok(
+    gated.legalAnalysis.recommended_actions.some((item: unknown) => String(item).includes("변호사 상담")),
+    "safety gate should add lawyer-consult guidance for high-risk outputs"
+  );
+  assert.deepEqual(
+    gated.safetyGate,
+    {
+      stage: "pre_output_safety_gate",
+      status: "adjusted",
+      adjusted_output: true,
+      blocked_reasons: ["unsupported_issue_present", "insufficient_grounding", "citation_integrity"],
+      warnings: [
+        "지원 범위 밖 이슈가 포함될 수 있어 단정적 해석을 피했습니다.",
+        "사실관계 또는 근거가 부족해 참고 수준 표현으로 제한했습니다.",
+        "인용 연결이 완전하지 않아 요약 표현을 보수적으로 유지했습니다.",
+        "고위험 상황 상담 권고를 보강했습니다."
+      ]
+    },
+    "safety gate should surface stable adjusted-output metadata"
+  );
+}
+
 async function verifyAnalysisCitationMapMatchesFinalCharges(): Promise<void> {
   const result = await runAnalysis(
     {
@@ -628,6 +748,35 @@ async function main() {
     ["legal_analysis", "meta"],
     "stored analysis payload should keep only minimal safe fields"
   );
+  assert.deepEqual(
+    stored.legal_analysis?.verifier,
+    {
+      stage: "",
+      status: "",
+      evidence_sufficient: false,
+      citation_integrity: false,
+      contradiction_detected: false,
+      selected_reference_count: 0,
+      issue_count: 0,
+      confidence_calibration: {
+        score: 0,
+        label: ""
+      },
+      warnings: []
+    },
+    "stored analysis payload should retain a stable verifier contract even when absent"
+  );
+  assert.deepEqual(
+    stored.legal_analysis?.safety_gate,
+    {
+      stage: "",
+      status: "",
+      adjusted_output: false,
+      blocked_reasons: [],
+      warnings: []
+    },
+    "stored analysis payload should retain a stable safety gate contract even when absent"
+  );
   assert.equal("ocr" in stored, false, "stored analysis payload must exclude raw OCR content");
   assert.deepEqual(
     stored.legal_analysis?.grounding_evidence,
@@ -636,6 +785,11 @@ async function main() {
       evidence_strength: ""
     },
     "stored analysis payload should keep only coarse grounding evidence summary"
+  );
+  assert.equal(
+    "citation_map" in (stored.legal_analysis ?? {}),
+    false,
+    "stored analysis payload must not persist citation path indexes"
   );
 
   const publicResult = buildPublicAnalysisResult(
@@ -704,6 +858,27 @@ async function main() {
       },
       legal_analysis: {
         summary: "public summary",
+        verifier: {
+          stage: "pre_analysis_verifier",
+          status: "warning",
+          evidence_sufficient: true,
+          citation_integrity: true,
+          contradiction_detected: false,
+          selected_reference_count: 2,
+          issue_count: 1,
+          confidence_calibration: {
+            score: 0.62,
+            label: "medium"
+          },
+          warnings: ["careful"]
+        },
+        safety_gate: {
+          stage: "pre_output_safety_gate",
+          status: "passed",
+          adjusted_output: false,
+          blocked_reasons: [],
+          warnings: []
+        },
         summary_grounding: {
           law_reference_id: "law:test",
           reference_key: "law:test",
@@ -747,7 +922,49 @@ async function main() {
             }
           ]
         },
-        selected_reference_ids: ["law:test"]
+        selected_reference_ids: ["law:test"],
+        citation_map: {
+          version: "v2",
+          citations: [
+            {
+              citation_id: "law-citation:test",
+              reference_id: "law:test",
+              reference_key: "law:test",
+              kind: "law",
+              statement_type: "summary",
+              statement_path: "legal_analysis.summary",
+              title: "형법 제307조",
+              confidence_score: 0.94,
+              match_reason: "요건이 직접 맞닿아 있습니다.",
+              matched_issue_types: ["명예훼손"],
+              query_refs: [{ text: "명예훼손", bucket: "precise", channel: "law" }],
+              query_source_tags: ["keyword"],
+              snippet: { field: "content", text: "공연히 사실을 적시하여 명예를 훼손한 경우" }
+            },
+            {
+              citation_id: "law-citation:issue-1",
+              reference_id: "law:test",
+              reference_key: "law:test",
+              kind: "law",
+              statement_type: "issue_card",
+              statement_path: "legal_analysis.issue_cards[0]",
+              title: "형법 제307조",
+              confidence_score: 0.91,
+              match_reason: "카드 체크리스트를 직접 뒷받침합니다.",
+              matched_issue_types: ["명예훼손"],
+              query_refs: [{ text: "명예훼손", bucket: "precise", channel: "law" }],
+              query_source_tags: ["keyword"],
+              snippet: { field: "content", text: "공연히 사실을 적시하여 명예를 훼손한 경우" }
+            }
+          ],
+          by_reference_id: {
+            "law:test": ["law-citation:test", "law-citation:issue-1"]
+          },
+          by_statement_path: {
+            "legal_analysis.summary": ["law-citation:test"],
+            "legal_analysis.issue_cards[0]": ["law-citation:issue-1"]
+          }
+        }
       }
     },
     []
@@ -769,12 +986,51 @@ async function main() {
     "public analysis meta must not expose retrieval trace"
   );
   assert.deepEqual(
+    publicResult.legal_analysis?.verifier,
+    {
+      stage: "pre_analysis_verifier",
+      status: "warning",
+      evidence_sufficient: true,
+      citation_integrity: true,
+      contradiction_detected: false,
+      selected_reference_count: 2,
+      issue_count: 1,
+      confidence_calibration: {
+        score: 0.62,
+        label: "medium"
+      },
+      warnings: ["careful"]
+    },
+    "public analysis response should expose sanitized verifier metadata"
+  );
+  assert.deepEqual(
+    publicResult.legal_analysis?.safety_gate,
+    {
+      stage: "pre_output_safety_gate",
+      status: "passed",
+      adjusted_output: false,
+      blocked_reasons: [],
+      warnings: []
+    },
+    "public analysis response should expose sanitized safety gate metadata"
+  );
+  assert.deepEqual(
     publicResult.legal_analysis?.grounding_evidence,
     {
       top_issue: "명예훼손",
       evidence_strength: "high"
     },
     "public analysis response should expose only coarse grounding evidence summary"
+  );
+  assert.equal(
+    publicResult.legal_analysis?.verifier?.stage,
+    "pre_analysis_verifier",
+    "public analysis response should expose verifier status"
+  );
+  assert.equal(
+    publicResult.legal_analysis?.safety_gate?.stage,
+    "pre_output_safety_gate",
+    "public analysis response should expose safety gate status"
   );
   assert.deepEqual(
     publicResult.legal_analysis?.summary_grounding,
@@ -805,6 +1061,52 @@ async function main() {
       snippet: { field: "content", text: "should not be public" }
     },
     "public analysis response should expose sanitized issue card grounding"
+  );
+  assert.deepEqual(
+    publicResult.legal_analysis?.citation_map,
+    {
+      version: "v2",
+      citations: [
+        {
+          citation_id: "law-citation:test",
+          reference_id: "law:test",
+          reference_key: "law:test",
+          kind: "law",
+          statement_type: "summary",
+          statement_path: "legal_analysis.summary",
+          title: "형법 제307조",
+          confidence_score: 0.94,
+          match_reason: "요건이 직접 맞닿아 있습니다.",
+          matched_issue_types: ["명예훼손"],
+          query_refs: [{ text: "명예훼손", bucket: "precise", channel: "law", sources: [], issue_types: [], legal_element_signals: [] }],
+          query_source_tags: ["keyword"],
+          snippet: { field: "content", text: "공연히 사실을 적시하여 명예를 훼손한 경우" }
+        },
+        {
+          citation_id: "law-citation:issue-1",
+          reference_id: "law:test",
+          reference_key: "law:test",
+          kind: "law",
+          statement_type: "issue_card",
+          statement_path: "legal_analysis.issue_cards[0]",
+          title: "형법 제307조",
+          confidence_score: 0.91,
+          match_reason: "카드 체크리스트를 직접 뒷받침합니다.",
+          matched_issue_types: ["명예훼손"],
+          query_refs: [{ text: "명예훼손", bucket: "precise", channel: "law", sources: [], issue_types: [], legal_element_signals: [] }],
+          query_source_tags: ["keyword"],
+          snippet: { field: "content", text: "공연히 사실을 적시하여 명예를 훼손한 경우" }
+        }
+      ],
+      by_reference_id: {
+        "law:test": ["law-citation:test", "law-citation:issue-1"]
+      },
+      by_statement_path: {
+        "legal_analysis.summary": ["law-citation:test"],
+        "legal_analysis.issue_cards[0]": ["law-citation:issue-1"]
+      }
+    },
+    "public analysis response should retain sanitized citation path indexing for summary and issue cards"
   );
   assert.equal(publicResult.ocr?.source_type, "messenger", "public analysis response should expose minimal OCR metadata");
   assert.equal("raw_text" in (publicResult.ocr ?? {}), false, "public OCR payload must not expose raw_text");
@@ -917,6 +1219,27 @@ async function main() {
       },
       legal_analysis: {
         summary: "분석 결과",
+        verifier: {
+          stage: "pre_analysis_verifier",
+          status: "passed",
+          evidence_sufficient: true,
+          citation_integrity: true,
+          contradiction_detected: false,
+          selected_reference_count: 1,
+          issue_count: 1,
+          confidence_calibration: {
+            score: 0.84,
+            label: "high"
+          },
+          warnings: []
+        },
+        safety_gate: {
+          stage: "pre_output_safety_gate",
+          status: "passed",
+          adjusted_output: false,
+          blocked_reasons: [],
+          warnings: []
+        },
         can_sue: false,
         risk_level: 1,
         disclaimer: "참고용",
@@ -952,6 +1275,11 @@ async function main() {
     persistedPublicResult.legal_analysis.summary,
     "분석 결과",
     "persistAnalysisRun should return the final public analysis result"
+  );
+  assert.equal(
+    persistedPublicResult.legal_analysis.verifier?.status,
+    "passed",
+    "persistAnalysisRun should preserve sanitized verifier metadata in the public result"
   );
 
   const agentDoneStreamEvent = buildPublicAnalysisStreamEvent("job-stream-test", {
@@ -1057,6 +1385,7 @@ async function main() {
     { providerMode: "mock" }
   );
   assert.equal(factsFirstAnalysis.can_sue, false, "low evidence should keep facts-only analysis conservative");
+  assert.equal(factsFirstAnalysis.verifier?.stage, "pre_analysis_verifier", "analysis agent should expose verifier output");
   assert.equal(
     typeof factsFirstAnalysis.decision_axis?.fact_signal_count,
     "number",
@@ -1264,6 +1593,33 @@ async function main() {
   assert.equal(citationLinkedAnalysis.charges[0]?.grounding?.citation_id, "law-1");
   assert.equal(citationLinkedAnalysis.charges[0]?.grounding?.query_refs?.[0]?.text, "협박 해악 고지");
   assert.equal(citationLinkedAnalysis.precedent_cards[0]?.grounding?.citation_id, "precedent-1");
+  assert.deepEqual(
+    citationLinkedAnalysis.citation_map?.by_statement_path?.["legal_analysis.charges[0]"],
+    ["law-1"],
+    "normalized analysis should retain citation path indexing"
+  );
+  assert.equal(citationLinkedAnalysis.verifier?.citation_integrity, true, "citation-linked analysis should preserve verifier integrity result");
+
+  const orchestratedCitationLinkedAnalysis = await runAnalysis(
+    {
+      request_id: "citation-linked-safety-gate",
+      input_type: "text",
+      context_type: "messenger",
+      text: "돈 안 주면 죽이겠다고 했어요"
+    },
+    { providerMode: "mock" }
+  );
+  assert.equal(
+    orchestratedCitationLinkedAnalysis.legal_analysis?.safety_gate?.stage,
+    "pre_output_safety_gate",
+    "orchestrated analysis should attach the safety gate output before returning"
+  );
+  assert.equal(
+    orchestratedCitationLinkedAnalysis.timeline.find((entry: Record<string, unknown>) => entry.agent === "analysis" && entry.type === "agent_done")?.summary?.safety_gate?.stage,
+    "pre_output_safety_gate",
+    "analysis timeline summary should surface sanitized safety gate metadata"
+  );
+
   const publicCitationLinkedAnalysis = buildPublicAnalysisResult(
     "job-citation-test",
     {
@@ -1334,6 +1690,8 @@ async function main() {
     ["agent_start", "agent_done", "complete"],
     "job manager should emit progress and completion events in order"
   );
+
+  verifyVerifierAndSafetyGateContracts();
 
   await verifyAnalysisGuestQuotaIgnoresForgedForwardedFor();
   await verifyInvalidAnalysisDoesNotConsumeGuestQuota();
