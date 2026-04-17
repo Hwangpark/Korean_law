@@ -3,19 +3,8 @@ import { runLawSearchAgent } from "../agents/law-search-agent.mjs";
 import { runLegalAnalysisAgent } from "../agents/legal-analysis-agent.mjs";
 import { runOcrAgent } from "../agents/ocr-agent.mjs";
 import { runPrecedentSearchAgent } from "../agents/precedent-search-agent.mjs";
-import {
-  buildReferenceSeeds,
-  materializeReferenceSeed
-} from "../analysis/references.js";
+import { buildCanonicalGroundingArtifacts } from "../analysis/grounding-pipeline.mjs";
 import { createRetrievalTools } from "../retrieval/tools.js";
-import {
-  buildLawVerificationCards,
-  buildPrecedentVerificationCards,
-  buildRetrievalEvidencePack
-} from "../retrieval/verification.js";
-import { buildScopeAssessment } from "../analysis/evidence.mjs";
-import { buildGroundingEvidenceFromRetrievalPack } from "../analysis/evidence.mjs";
-import { buildPreAnalysisVerifier } from "../analysis/verifier.mjs";
 import { applyPreOutputSafetyGate } from "../analysis/safety-gate.mjs";
 
 function emitTimelineEvent(timeline, event, onEvent) {
@@ -116,45 +105,32 @@ export async function runAnalysis(request, options = {}) {
     supported_issues: retrievalPlan.supportedIssues,
     unsupported_issues: retrievalPlan.unsupportedIssues
   }, onEvent);
-  const pseudoResult = {
-    law_search: {
-      laws: lawSearch.laws
-    },
-    precedent_search: {
-      precedents: precedentSearch.precedents
-    }
-  };
-  const referenceSeeds = buildReferenceSeeds(pseudoResult, providerMode);
-  const referenceLibrary = referenceSeeds.map((seed) =>
-    materializeReferenceSeed(seed, {
-      createdAt: new Date(0).toISOString(),
-      updatedAt: new Date(0).toISOString()
-    })
-  );
-  const referencesByKey = new Map(referenceLibrary.map((item) => [item.id, item]));
-  const matchedLaws = buildLawVerificationCards(retrievalPlan, lawSearch.laws, referencesByKey);
-  const matchedPrecedents = buildPrecedentVerificationCards(retrievalPlan, precedentSearch.precedents, referencesByKey);
   const retrievalMeta = retrievalTools.buildCombinedRetrievalMeta({
     law_search: lawSearch,
     precedent_search: precedentSearch
   });
-  const retrievalEvidencePack = buildRetrievalEvidencePack({
-    plan: retrievalPlan,
-    retrievalPreview: retrievalMeta.retrieval_preview,
-    retrievalTrace: retrievalMeta.retrieval_trace,
-    matchedLaws,
-    matchedPrecedents,
-    referenceLibraryItems: referenceLibrary
-  });
-
-  const scopeAssessment = buildScopeAssessment(classification, retrievalPlan);
-  const groundingEvidence = buildGroundingEvidenceFromRetrievalPack(retrievalEvidencePack);
-  const verifier = buildPreAnalysisVerifier({
-    classificationResult: classification,
-    retrievalPlan,
+  const {
     retrievalEvidencePack,
     scopeAssessment,
-    evidencePack: groundingEvidence
+    verifier
+  } = await buildCanonicalGroundingArtifacts({
+    providerMode,
+    retrievalPlan,
+    lawSearch: {
+      ...lawSearch,
+      retrieval_preview: retrievalMeta.retrieval_preview?.law ?? lawSearch.retrieval_preview,
+      retrieval_trace: Array.isArray(retrievalMeta.retrieval_trace)
+        ? retrievalMeta.retrieval_trace.filter((entry) => entry?.stage === "law")
+        : lawSearch.retrieval_trace
+    },
+    precedentSearch: {
+      ...precedentSearch,
+      retrieval_preview: retrievalMeta.retrieval_preview?.precedent ?? precedentSearch.retrieval_preview,
+      retrieval_trace: Array.isArray(retrievalMeta.retrieval_trace)
+        ? retrievalMeta.retrieval_trace.filter((entry) => entry?.stage === "precedent")
+        : precedentSearch.retrieval_trace
+    },
+    classificationResult: classification
   });
 
   const legalAnalysisDraft = await runStage(

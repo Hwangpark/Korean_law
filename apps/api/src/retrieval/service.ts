@@ -1,9 +1,6 @@
-import { buildReferenceSeeds, type ReferenceLibraryItem } from "../analysis/references.js";
+import type { ReferenceLibraryItem } from "../analysis/references.js";
 import type { AnalysisStore } from "../analysis/store.js";
-import {
-  buildGroundingEvidenceFromRetrievalPack,
-  buildScopeAssessment
-} from "../analysis/evidence.mjs";
+import { buildCanonicalGroundingArtifacts } from "../analysis/grounding-pipeline.mjs";
 import type {
   KeywordVerificationRequest,
   KeywordQueryPlan,
@@ -16,9 +13,6 @@ import type {
 import type { KeywordVerificationStore } from "./store.js";
 import { createRetrievalTools } from "./tools.js";
 import {
-  buildLawVerificationCards,
-  buildPrecedentVerificationCards,
-  buildRetrievalEvidencePack,
   buildVerificationHeadline,
   buildVerificationInterpretation
 } from "./verification.js";
@@ -72,24 +66,6 @@ interface VerificationArtifacts {
   groundingEvidence: NonNullable<KeywordVerificationResponse["legal_analysis"]["grounding_evidence"]>;
 }
 
-function buildPseudoAnalysisResult(
-  laws: LawDocumentRecord[],
-  precedents: PrecedentDocumentRecord[]
-): Record<string, unknown> {
-  return {
-    law_search: {
-      laws
-    },
-    precedent_search: {
-      precedents
-    }
-  };
-}
-
-function buildReferenceMap(items: ReferenceLibraryItem[]): Map<string, ReferenceLibraryItem> {
-  return new Map(items.map((item) => [item.id, item]));
-}
-
 async function buildVerificationArtifacts(input: {
   providerMode: string;
   plan: KeywordQueryPlan;
@@ -98,52 +74,25 @@ async function buildVerificationArtifacts(input: {
   precedentSearch: PrecedentSearchRuntimeResult;
   saveReferenceLibrary(result: Record<string, unknown>): Promise<ReferenceLibraryItem[]>;
 }): Promise<VerificationArtifacts> {
-  const pseudoResult = buildPseudoAnalysisResult(input.lawSearch.laws, input.precedentSearch.precedents);
-  const referenceSeeds = buildReferenceSeeds(pseudoResult, input.providerMode);
-  const referenceLibrary = await input.saveReferenceLibrary(pseudoResult);
-  const referencesByKey = buildReferenceMap(referenceLibrary);
-  const matchedLaws = buildLawVerificationCards(input.plan, input.lawSearch.laws, referencesByKey).slice(0, input.limit);
-  const matchedPrecedents = buildPrecedentVerificationCards(
-    input.plan,
-    input.precedentSearch.precedents,
-    referencesByKey
-  ).slice(0, input.limit);
-  const allReferences = referenceSeeds
-    .map((seed) => referencesByKey.get(seed.sourceKey))
-    .filter((item): item is ReferenceLibraryItem => Boolean(item));
-  const retrievalTrace = [
-    ...input.lawSearch.retrieval_trace,
-    ...input.precedentSearch.retrieval_trace
-  ];
-  const retrievalPreview = buildRetrievalPreview({
-    law: input.lawSearch.retrieval_preview,
-    precedent: input.precedentSearch.retrieval_preview
+  const canonicalArtifacts = await buildCanonicalGroundingArtifacts({
+    providerMode: input.providerMode,
+    retrievalPlan: input.plan,
+    lawSearch: input.lawSearch,
+    precedentSearch: input.precedentSearch,
+    limit: input.limit,
+    saveReferenceLibrary: input.saveReferenceLibrary
   });
-  const retrievalEvidencePack = buildRetrievalEvidencePack({
-    plan: input.plan,
-    retrievalPreview,
-    retrievalTrace,
-    matchedLaws,
-    matchedPrecedents,
-    referenceLibraryItems: allReferences
-  });
-  const scopeAssessment = buildScopeAssessment(
-    {
-      issues: input.plan.candidateIssues
-    },
-    input.plan
-  );
 
   return {
     responsePlan: buildResponsePlan(input.plan),
-    retrievalPreview,
-    retrievalTrace,
-    matchedLaws,
-    matchedPrecedents,
-    allReferences,
-    retrievalEvidencePack,
-    scopeAssessment,
-    groundingEvidence: buildGroundingEvidenceFromRetrievalPack(retrievalEvidencePack)
+    retrievalPreview: buildRetrievalPreview(canonicalArtifacts.retrievalPreview),
+    retrievalTrace: canonicalArtifacts.retrievalTrace,
+    matchedLaws: canonicalArtifacts.matchedLaws,
+    matchedPrecedents: canonicalArtifacts.matchedPrecedents,
+    allReferences: canonicalArtifacts.allReferences,
+    retrievalEvidencePack: canonicalArtifacts.retrievalEvidencePack,
+    scopeAssessment: canonicalArtifacts.scopeAssessment,
+    groundingEvidence: canonicalArtifacts.groundingEvidence
   };
 }
 
