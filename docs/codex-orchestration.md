@@ -87,6 +87,52 @@
 - `npm run orch:run -- --task <id> [--json]` : OpenClaw subagent에 넘길 spawn-ready task payload 생성
 - `npm run orch:validate` : task/role 정의와 파일 범위 경고 검사
 
+## OpenClaw live subagent 연결 방식
+
+저장소 안의 orchestration 스크립트는 task 선택, brief 생성, claim/update, review checklist, spawn-ready payload 생성을 담당한다.
+실제 서브에이전트 실행은 OpenClaw 메인 세션이 `sessions_spawn`으로 담당한다.
+
+권장 흐름:
+
+1. `npm run orch:next -- --json` 으로 다음 task 선택
+2. `npm run orch:claim -- --task <id>` 로 task 점유
+3. `npm run orch:run -- --task <id> --json` 으로 spawn-ready payload 생성
+4. OpenClaw 메인 세션이 아래 형태로 `sessions_spawn` 호출
+5. 필요하면 `sessions_yield`로 completion 이벤트 대기
+6. 완료 후 `npm run orch:update -- --task <id> --status completed` 또는 `blocked`
+7. reviewer가 `npm run orch:review -- --task <id> --write` 로 review checklist 생성
+
+### 권장 sessions_spawn 매핑
+
+- `runtime: "subagent"`
+- `mode: "run"`
+- `task`: `orch:run` 출력의 `recommended_spawn.task`
+- `label`: `koreanlaw:<task-id>:<role>`
+- `cwd`: KoreanLaw repo root
+- `cleanup: "delete"`
+- `streamTo: "parent"`
+
+예시 개념:
+
+```json
+{
+  "runtime": "subagent",
+  "mode": "run",
+  "label": "koreanlaw:orch-006:reviewer",
+  "cwd": "/Users/minsu/Desktop/KoreanLaw",
+  "task": "Task: ...",
+  "cleanup": "delete",
+  "streamTo": "parent"
+}
+```
+
+중요:
+
+- Codex/Claude Code/Gemini CLI 같은 external harness 요청은 이 경로가 아니라 ACP runtime으로 보내야 한다.
+- OpenClaw-native delegation만 `runtime: \"subagent\"` 로 보낸다.
+- 완료 대기는 polling loop보다 `sessions_yield`를 우선한다.
+- subagent는 파일 소유권과 역할 guardrail을 brief에 포함한 상태로 받아야 한다.
+
 ## 검증 게이트
 
 작업 종류별 최소 검증은 아래를 따른다.

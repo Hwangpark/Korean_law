@@ -97,14 +97,26 @@
     {
       "id": "orch-008",
       "title": "Connect orchestration runner to live OpenClaw session spawning",
-      "status": "pending",
+      "status": "completed",
       "owner_role": "orchestrator",
       "files": [
         "docs/codex-orchestration.md",
         "ops/tasks.json"
       ],
-      "validation": ["npm run orch:validate", "npm run typecheck"],
-      "notes": "Document and prototype how the generated run payload maps to sessions_spawn and sessions_yield in a live OpenClaw orchestrator session."
+      "validation": ["npm run orch:run -- --json", "npm run orch:validate", "npm run typecheck"],
+      "notes": "Documented the mapping from repo-side run payloads to OpenClaw sessions_spawn and sessions_yield flow."
+    },
+    {
+      "id": "orch-009",
+      "title": "Pilot one delegated KoreanLaw task through a real subagent run",
+      "status": "pending",
+      "owner_role": "orchestrator",
+      "files": [
+        "docs/review-notes.md",
+        "ops/tasks.json"
+      ],
+      "validation": ["npm run orch:review -- --task orch-003", "npm run orch:validate", "npm run typecheck"],
+      "notes": "Use the orchestration flow on one real task and record the resulting handoff/review behavior."
     }
   ]
 }
