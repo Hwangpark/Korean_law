@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "wip_limit": 5,
+  "tasks": [
+    {
+      "id": "orch-001",
+      "title": "Keep orchestration rules aligned with AGENTS.md",
+      "status": "completed",
+      "owner_role": "orchestrator",
+      "files": [
+        "AGENTS.md",
+        "docs/codex-orchestration.md",
+        "ops/agent-roles.json",
+        "ops/tasks.json"
+      ],
+      "validation": ["npm run typecheck"],
+      "notes": "Initial rule set for file ownership, validation gates, and MCP-first boundaries."
+    },
+    {
+      "id": "orch-002",
+      "title": "Add task queue automation script",
+      "status": "completed",
+      "owner_role": "orchestrator",
+      "files": [
+        "scripts/orchestrator/next-task.ts",
+        "scripts/orchestrator/validate-task.ts"
+      ],
+      "validation": ["npm run typecheck", "npm run orch:validate"],
+      "notes": "Machine-readable task selection and validation commands now scaffold the orchestration flow."
+    },
+    {
+      "id": "orch-003",
+      "title": "Add reviewer checklist output",
+      "status": "pending",
+      "owner_role": "reviewer",
+      "files": [
+        "docs/review-notes.md"
+      ],
+      "validation": ["npm run check"],
+      "notes": "Use after the next feature implementation to record review findings and residual risks."
+    },
+    {
+      "id": "orch-004",
+      "title": "Add task brief generator for sub-agent handoff",
+      "status": "pending",
+      "owner_role": "orchestrator",
+      "files": [
+        "docs/codex-orchestration.md",
+        "ops/tasks.json"
+      ],
+      "validation": ["npm run orch:validate"],
+      "notes": "Next step: emit reusable handoff briefs for planner, builders, verifier, and reviewer."
+    }
+  ]
+}

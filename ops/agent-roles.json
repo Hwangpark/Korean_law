@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "default_branch": "codex",
+  "protected_branches": ["main"],
+  "wip_limit": 5,
+  "reviewer_ratio": "1 reviewer per 3-4 builders",
+  "global_rules": [
+    "Do not touch main.",
+    "Do not commit .claude/, .env.local, or secrets unless explicitly requested.",
+    "One agent owns one file at a time.",
+    "Runtime stage names stay ocr, classifier, law, precedent, analysis, orchestrator.",
+    "MCP-first retrieval logic stays in retrieval runtime, not in law/precedent agents.",
+    "Do not remove privacy masking, guest quota, or disclaimer rules.",
+    "Stop after three repeated failures on the same error and report a new plan."
+  ],
+  "roles": [
+    {
+      "name": "orchestrator",
+      "purpose": "Split work, assign ownership, integrate reviewed changes.",
+      "write_scopes": ["docs/**", "ops/**", "scripts/orchestrator/**"],
+      "must_not_touch": [".claude/**", ".env.local", "main branch"]
+    },
+    {
+      "name": "planner",
+      "purpose": "Read architecture docs and define acceptance criteria before implementation.",
+      "write_scopes": ["docs/**", "project.md", "ARCHITECTURE.md"],
+      "must_not_touch": ["apps/api/src/**", "apps/web/**"]
+    },
+    {
+      "name": "backend-worker",
+      "purpose": "Implement API, auth, analysis, persistence, and job lifecycle changes.",
+      "write_scopes": ["apps/api/src/analysis/**", "apps/api/src/auth/**", "apps/api/src/http/**", "apps/api/src/server.ts", "scripts/test-*.ts"],
+      "must_not_touch": ["apps/web/**", ".env.local"]
+    },
+    {
+      "name": "retrieval-worker",
+      "purpose": "Implement planner, MCP-style tools, adapter, verification, fixtures, and retrieval tests.",
+      "write_scopes": ["apps/api/src/retrieval/**", "apps/api/src/lib/**", "fixtures/providers/**", "fixtures/requests/**", "scripts/test-retrieval-*.ts", "scripts/test-verification-*.ts", "scripts/test-classification-retrieval-bridge.ts"],
+      "must_not_touch": ["apps/api/src/agents/law-search-agent.mjs", "apps/api/src/agents/precedent-search-agent.mjs"]
+    },
+    {
+      "name": "runtime-agent-worker",
+      "purpose": "Keep service runtime agent wrappers thin and aligned with multi-agent contract.",
+      "write_scopes": ["apps/api/src/agents/**", "apps/api/src/orchestrator/**", "scripts/test-pipeline.mjs", "scripts/test-guided-extraction-agent.ts"],
+      "must_not_touch": ["apps/api/src/retrieval/tools.ts", "apps/api/src/retrieval/mcp-adapter.ts"]
+    },
+    {
+      "name": "frontend-worker",
+      "purpose": "Add UI features while preserving the current KoreanLaw UI direction.",
+      "write_scopes": ["apps/web/**"],
+      "must_not_touch": ["apps/api/src/**"]
+    },
+    {
+      "name": "verifier",
+      "purpose": "Run validation and identify regressions without broad edits.",
+      "write_scopes": ["scripts/**", "docs/**"],
+      "must_not_touch": ["apps/api/src/**", "apps/web/**"]
+    },
+    {
+      "name": "reviewer",
+      "purpose": "Review for law accuracy, privacy, disclaimer, retrieval evidence, and file-boundary violations.",
+      "write_scopes": ["docs/review-notes.md"],
+      "must_not_touch": ["apps/api/src/**", "apps/web/**", "fixtures/**"]
+    }
+  ],
+  "validation_profiles": {
+    "api_runtime": ["npm run typecheck", "npm run test:mock"],
+    "retrieval": ["npm run test:bridge", "npm run test:evidence-pack", "npm run test:retrieval-rerank", "npm run test:retrieval-provider"],
+    "classifier": ["npm run test:guided-extraction", "npm run test:scope-filter", "npm run test:mixed-fixtures"],
+    "keyword": ["npm run test:keyword", "npm run test:keyword-http"],
+    "web": ["npm run web:check", "npm run build:web"],
+    "full": ["npm run check"]
+  }
+}
