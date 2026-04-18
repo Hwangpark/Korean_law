@@ -28,6 +28,8 @@ export interface PublicAnalysisResult {
   };
   meta: {
     provider_mode: string;
+    provider_source: string;
+    provider_notice: string;
     generated_at: string;
     input_type: string;
     context_type: string;
@@ -671,16 +673,59 @@ export function buildPublicAgentResult(agent: string, result: unknown): Record<s
 export function buildStoredAnalysisResult(result: Record<string, unknown>): Record<string, unknown> {
   const meta = asRecord(result.meta);
   const legalAnalysis = asRecord(result.legal_analysis);
+  const providerMode = asString(meta.provider_mode, "mock");
+  const providerSource = inferProviderSource(result);
 
   return {
     meta: {
-      provider_mode: asString(meta.provider_mode, "mock"),
+      provider_mode: providerMode,
+      provider_source: providerSource,
+      provider_notice: buildProviderNotice(providerMode, providerSource),
       generated_at: asString(meta.generated_at, new Date().toISOString()),
       input_type: asString(meta.input_type, "text"),
       context_type: asString(meta.context_type, "other")
     },
     legal_analysis: sanitizeStoredLegalAnalysis(legalAnalysis)
   };
+}
+
+function inferProviderSource(result: Record<string, unknown>): string {
+  const meta = asRecord(result.meta);
+  const traceEntries = [
+    ...(Array.isArray(meta.retrieval_trace) ? meta.retrieval_trace : []),
+    ...(Array.isArray(asRecord(result.law_search).retrieval_trace) ? asRecord(result.law_search).retrieval_trace as unknown[] : []),
+    ...(Array.isArray(asRecord(result.precedent_search).retrieval_trace) ? asRecord(result.precedent_search).retrieval_trace as unknown[] : [])
+  ];
+
+  for (const rawEntry of traceEntries) {
+    const entry = asRecord(rawEntry);
+    const reason = asString(entry.reason).toLowerCase();
+    if (reason.includes("provider_source=live_fallback")) {
+      return "live_fallback";
+    }
+    if (reason.includes("provider_source=live")) {
+      return "live";
+    }
+    if (reason.includes("provider_source=fixture")) {
+      return "fixture";
+    }
+  }
+
+  return asString(meta.provider_mode, "mock") === "live" ? "live" : "fixture";
+}
+
+function buildProviderNotice(providerMode: string, providerSource: string): string {
+  if (providerSource === "live") {
+    return "실제 provider 결과를 공용 retrieval 계약으로 정규화해 표시했습니다.";
+  }
+
+  if (providerSource === "live_fallback") {
+    return "live 모드로 요청됐지만 현재 실행에서는 실제 provider가 연결되지 않아 fixture 결과로 대체했습니다.";
+  }
+
+  return providerMode === "live"
+    ? "live 모드 설정이지만 이번 응답은 fixture 기준으로 처리됐습니다."
+    : "mock fixture 기준 결과입니다.";
 }
 
 export function buildStoredRuntimeArtifacts(result: Record<string, unknown>): StoredRuntimeArtifacts {
@@ -717,6 +762,8 @@ export function buildPublicAnalysisResult(
   const meta = asRecord(result.meta);
   const legalAnalysis = asRecord(result.legal_analysis);
   const profileContext = sanitizePublicProfileContext(legalAnalysis.profile_context as Record<string, unknown> | null | undefined);
+  const providerMode = asString(meta.provider_mode, "mock");
+  const providerSource = inferProviderSource(result);
 
   return {
     job_id: jobId,
@@ -731,7 +778,9 @@ export function buildPublicAnalysisResult(
       items: referenceLibrary
     },
     meta: {
-      provider_mode: asString(meta.provider_mode, "mock"),
+      provider_mode: providerMode,
+      provider_source: providerSource,
+      provider_notice: buildProviderNotice(providerMode, providerSource),
       generated_at: asString(meta.generated_at, new Date().toISOString()),
       input_type: asString(meta.input_type, "text"),
       context_type: asString(meta.context_type, "other")

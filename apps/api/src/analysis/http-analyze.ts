@@ -61,8 +61,10 @@ export function createAnalyzeEndpoint(
     if (req.method === "GET") {
       const analysisRoute = parseAnalysisRoute(pathname);
       if (analysisRoute) {
+        const requestUrl = new URL(req.url ?? "/", "http://localhost");
+        const accessToken = requestUrl.searchParams.get("access_token") ?? "";
         const job = input.jobManager.getJob(analysisRoute.jobId);
-        if (!job) {
+        if (!job || accessToken !== job.accessToken) {
           jsonResponse(res, input.authConfig, 404, { error: "Analysis job not found." }, req);
           return true;
         }
@@ -200,7 +202,7 @@ export function createAnalyzeEndpoint(
         res,
         input.authConfig,
         202,
-        buildAnalysisAcceptedEnvelope(job.id, guestUsage),
+        buildAnalysisAcceptedEnvelope(job.id, job.accessToken, guestUsage),
         req
       );
     } catch (error) {

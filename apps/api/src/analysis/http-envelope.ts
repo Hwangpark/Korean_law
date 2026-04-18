@@ -26,12 +26,14 @@ function buildGuestUsageFields(
 
 export function buildAnalysisAcceptedEnvelope(
   jobId: string,
+  accessToken: string,
   guestUsage?: GuestUsageResult | null
 ): Record<string, unknown> {
+  const query = `access_token=${encodeURIComponent(accessToken)}`;
   return {
     job_id: jobId,
-    stream_url: `/api/analyze/${encodeURIComponent(jobId)}/stream`,
-    result_url: `/api/analyze/${encodeURIComponent(jobId)}`,
+    stream_url: `/api/analyze/${encodeURIComponent(jobId)}/stream?${query}`,
+    result_url: `/api/analyze/${encodeURIComponent(jobId)}?${query}`,
     ...buildGuestUsageFields(guestUsage)
   };
 }

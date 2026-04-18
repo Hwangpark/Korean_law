@@ -189,6 +189,9 @@ export type AnalyzeCaseResponse = {
   meta?: {
     guest_id?: string;
     guest_remaining?: number;
+    provider_mode?: string;
+    provider_source?: string;
+    provider_notice?: string;
   };
   [key: string]: unknown;
 };
@@ -202,6 +205,9 @@ export type AnalyzeJobStartResponse = {
   meta?: {
     guest_id?: string;
     guest_remaining?: number;
+    provider_mode?: string;
+    provider_source?: string;
+    provider_notice?: string;
   };
   [key: string]: unknown;
 };
@@ -606,8 +612,15 @@ export async function analyzeCase(
   });
 }
 
-export async function fetchAnalysisResult(baseUrl: string, jobId: string) {
-  return requestJson<AnalyzeCaseResponse>(`${normalizeBaseUrl(baseUrl)}/api/analyze/${encodeURIComponent(jobId)}`, {
+export async function fetchAnalysisResult(baseUrl: string, jobIdOrUrl: string) {
+  const target = /^https?:\/\//i.test(jobIdOrUrl) || jobIdOrUrl.startsWith('/api/')
+    ? jobIdOrUrl
+    : `${normalizeBaseUrl(baseUrl)}/api/analyze/${encodeURIComponent(jobIdOrUrl)}`;
+  const url = /^https?:\/\//i.test(target)
+    ? target
+    : `${normalizeBaseUrl(baseUrl)}${target.startsWith('/') ? '' : '/'}${target}`;
+
+  return requestJson<AnalyzeCaseResponse>(url, {
     method: 'GET',
   });
 }

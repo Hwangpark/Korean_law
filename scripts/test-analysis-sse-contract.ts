@@ -302,8 +302,19 @@ async function verifyReplayAndCompleteShape(): Promise<void> {
     const streamUrl = `${baseUrl}${String(accepted.body.stream_url ?? "")}`;
     const resultUrl = `${baseUrl}${String(accepted.body.result_url ?? "")}`;
     assert.ok(jobId, "accepted response should include job_id");
-    assert.ok(streamUrl.endsWith(`/api/analyze/${encodeURIComponent(jobId)}/stream`), "accepted response should include stream_url");
-    assert.ok(resultUrl.endsWith(`/api/analyze/${encodeURIComponent(jobId)}`), "accepted response should include result_url");
+    assert.match(
+      streamUrl,
+      new RegExp(`/api/analyze/${encodeURIComponent(jobId)}/stream\\?access_token=`),
+      "accepted response should include stream_url with an access token"
+    );
+    assert.match(
+      resultUrl,
+      new RegExp(`/api/analyze/${encodeURIComponent(jobId)}\\?access_token=`),
+      "accepted response should include result_url with an access token"
+    );
+
+    const unauthorizedResult = await getJson(`${baseUrl}/api/analyze/${encodeURIComponent(jobId)}`);
+    assert.equal(unauthorizedResult.status, 404, "result endpoint should require the analysis access token");
 
     const completed = await waitForTerminalResult(resultUrl);
     assert.equal(
@@ -406,7 +417,16 @@ async function verifyReplayErrorShape(): Promise<void> {
   );
 
   await withServer(handler, async (baseUrl) => {
-    const events = await readSse(`${baseUrl}/api/analyze/${encodeURIComponent(failedJob.id)}/stream`);
+    const unauthorizedStream = await fetch(`${baseUrl}/api/analyze/${encodeURIComponent(failedJob.id)}/stream`, {
+      headers: {
+        accept: "text/event-stream"
+      }
+    });
+    assert.equal(unauthorizedStream.status, 404, "SSE endpoint should require the analysis access token");
+
+    const events = await readSse(
+      `${baseUrl}/api/analyze/${encodeURIComponent(failedJob.id)}/stream?access_token=${encodeURIComponent(failedJob.accessToken)}`
+    );
     assert.ok(events.length >= 1, "failed replay stream should include at least one event");
 
     const errorEvent = events.at(-1);

@@ -48,8 +48,8 @@ const RUNTIME_MODE = (import.meta.env.VITE_LAW_PROVIDER ?? 'mock').toLowerCase()
 const RUNTIME_IS_LIVE = RUNTIME_MODE === 'live';
 const RUNTIME_BADGE = RUNTIME_IS_LIVE ? 'LIVE' : 'MOCK';
 const RUNTIME_NOTICE = RUNTIME_IS_LIVE
-  ? 'LIVE 설정입니다. 실제 provider가 주입되지 않으면 서버가 fixture fallback을 사용할 수 있습니다.'
-  : '현재 로컬 검색은 law.go.kr 실시간 조회가 아니라 mock fixture 기반입니다. 그래서 응답이 매우 빠르게 끝납니다.';
+  ? 'LIVE 설정입니다. 다만 실제 실행에서는 provider 연결 상태에 따라 fixture fallback이 사용될 수 있습니다.'
+  : '현재 로컬 검색은 실시간 조회가 아니라 mock fixture 기반입니다. 그래서 응답이 매우 빠르게 끝날 수 있습니다.';
 
 const DRAFT_STORAGE_KEY = 'korean-law.continuity.draft';
 const LAST_RESULT_STORAGE_KEY = 'korean-law.continuity.last-result';
@@ -97,11 +97,62 @@ type UserProfileContext = {
   [key: string]: unknown;
 };
 
+type FactSheet = {
+  keyPoints: string[];
+  missingPoints: string[];
+  unsupportedPoints: string[];
+  recommendedFocus: string[];
+};
+
+type ClaimSupportEntry = {
+  claimType: 'summary' | 'charge';
+  claimPath: string;
+  title: string;
+  supportLevel: 'direct' | 'partial' | 'missing';
+  citationIds: string[];
+  referenceIds: string[];
+  evidenceCount: number;
+  precedentCount?: number;
+  hasSnippet?: boolean;
+  matchReason?: string;
+};
+
+type ClaimSupport = {
+  overall: 'direct' | 'partial' | 'missing';
+  directCount: number;
+  partialCount: number;
+  missingCount: number;
+  entries: ClaimSupportEntry[];
+};
+
+type VerifierSummary = {
+  stage?: string;
+  status: string;
+  evidenceSufficient: boolean;
+  citationIntegrity: boolean;
+  contradictionDetected: boolean;
+  selectedReferenceCount: number;
+  issueCount: number;
+  confidenceScore: number;
+  confidenceLabel: string;
+  warnings: string[];
+};
+
+type RuntimeTrustInfo = {
+  providerMode: string;
+  providerSource: 'fixture' | 'live' | 'live_fallback';
+  notice: string;
+};
+
 type AnalysisResult = {
+  runtimeTrust?: RuntimeTrustInfo | null;
   can_sue: boolean;
   risk_level: number;
   summary: string;
   summary_grounding?: DetailGrounding | null;
+  fact_sheet?: FactSheet | null;
+  claim_support?: ClaimSupport | null;
+  verifier?: VerifierSummary | null;
   charges: Charge[];
   recommended_actions: string[];
   evidence_to_collect: string[];
@@ -119,6 +170,9 @@ type AnalysisLegalResultWithProfile = AnalysisLegalResult & {
   user_profile?: UserProfileContext | null;
   profile_context?: UserProfileContext | null;
   profile_considerations?: string[];
+  fact_sheet?: Record<string, unknown> | null;
+  claim_support?: Record<string, unknown> | null;
+  verifier?: Record<string, unknown> | null;
   age_band?: string;
   age_years?: number;
   is_minor?: boolean;
@@ -829,6 +883,174 @@ function describeGrounding(grounding?: DetailGrounding | null) {
   ].filter((item): item is string => item.length > 0);
 }
 
+function normalizeFactSheet(value: unknown): FactSheet | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const factSheet: FactSheet = {
+    keyPoints: toTextList(value.key_points ?? value.keyPoints),
+    missingPoints: toTextList(value.missing_points ?? value.missingPoints),
+    unsupportedPoints: toTextList(value.unsupported_points ?? value.unsupportedPoints),
+    recommendedFocus: toTextList(value.recommended_focus ?? value.recommendedFocus),
+  };
+
+  if (
+    factSheet.keyPoints.length === 0 &&
+    factSheet.missingPoints.length === 0 &&
+    factSheet.unsupportedPoints.length === 0 &&
+    factSheet.recommendedFocus.length === 0
+  ) {
+    return null;
+  }
+
+  return factSheet;
+}
+
+function normalizeClaimSupport(value: unknown): ClaimSupport | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const entries = Array.isArray(value.entries)
+    ? value.entries.reduce<ClaimSupportEntry[]>((items, entry) => {
+        if (!isRecord(entry)) {
+          return items;
+        }
+
+        const title = getText(entry.title);
+        const supportLevel =
+          entry.support_level === 'direct' || entry.support_level === 'partial' || entry.support_level === 'missing'
+            ? entry.support_level
+            : 'missing';
+
+        if (!title) {
+          return items;
+        }
+
+        items.push({
+          claimType: entry.claim_type === 'charge' ? 'charge' : 'summary',
+          claimPath: getText(entry.claim_path),
+          title,
+          supportLevel,
+          citationIds: toTextList(entry.citation_ids),
+          referenceIds: toTextList(entry.reference_ids),
+          evidenceCount: typeof entry.evidence_count === 'number' ? entry.evidence_count : 0,
+          precedentCount: typeof entry.precedent_count === 'number' ? entry.precedent_count : undefined,
+          hasSnippet: typeof entry.has_snippet === 'boolean' ? entry.has_snippet : undefined,
+          matchReason: firstText(entry.match_reason) || undefined,
+        });
+        return items;
+      }, [])
+    : [];
+
+  const claimSupport: ClaimSupport = {
+    overall:
+      value.overall === 'direct' || value.overall === 'partial' || value.overall === 'missing'
+        ? value.overall
+        : 'missing',
+    directCount: typeof value.direct_count === 'number' ? value.direct_count : 0,
+    partialCount: typeof value.partial_count === 'number' ? value.partial_count : 0,
+    missingCount: typeof value.missing_count === 'number' ? value.missing_count : 0,
+    entries,
+  };
+
+  if (
+    claimSupport.directCount === 0 &&
+    claimSupport.partialCount === 0 &&
+    claimSupport.missingCount === 0 &&
+    claimSupport.entries.length === 0
+  ) {
+    return null;
+  }
+
+  return claimSupport;
+}
+
+function normalizeVerifier(value: unknown): VerifierSummary | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const calibration = isRecord(value.confidence_calibration) ? value.confidence_calibration : {};
+  const verifier: VerifierSummary = {
+    stage: firstText(value.stage) || undefined,
+    status: firstText(value.status) || 'unknown',
+    evidenceSufficient: Boolean(value.evidence_sufficient),
+    citationIntegrity: Boolean(value.citation_integrity),
+    contradictionDetected: Boolean(value.contradiction_detected),
+    selectedReferenceCount: typeof value.selected_reference_count === 'number' ? value.selected_reference_count : 0,
+    issueCount: typeof value.issue_count === 'number' ? value.issue_count : 0,
+    confidenceScore: typeof calibration.score === 'number' ? calibration.score : 0,
+    confidenceLabel: firstText(calibration.label) || 'unknown',
+    warnings: toTextList(value.warnings),
+  };
+
+  return verifier;
+}
+
+function formatVerifierStatus(status: string) {
+  if (status === 'ready') {
+    return '검증 통과';
+  }
+  if (status === 'needs_caution') {
+    return '주의 필요';
+  }
+  return status || '확인 필요';
+}
+
+function formatConfidenceLabel(label: string) {
+  if (label === 'high') {
+    return '높음';
+  }
+  if (label === 'medium') {
+    return '보통';
+  }
+  if (label === 'low') {
+    return '낮음';
+  }
+  return label || '미상';
+}
+
+function formatSupportLevel(level: ClaimSupportEntry['supportLevel'] | ClaimSupport['overall']) {
+  if (level === 'direct') {
+    return '직접 뒷받침';
+  }
+  if (level === 'partial') {
+    return '부분 뒷받침';
+  }
+  return '근거 부족';
+}
+
+function buildTrustDetail(result: AnalysisResult): DetailPanelData {
+  const factHighlights = [
+    ...(result.fact_sheet?.keyPoints ?? []),
+    ...(result.fact_sheet?.recommendedFocus ?? []),
+    ...(result.fact_sheet?.missingPoints ?? []).map((item) => `보강 필요: ${item}`),
+    ...(result.fact_sheet?.unsupportedPoints ?? []).map((item) => `미확인: ${item}`),
+    ...(result.verifier?.warnings ?? []).map((item) => `주의: ${item}`),
+  ].slice(0, 12);
+
+  return buildDetailPanelData(
+    '사실 · 검증 요약',
+    '분석 신뢰 신호',
+    result.summary,
+    [
+      { label: '검증 상태', value: formatVerifierStatus(result.verifier?.status ?? 'unknown') },
+      { label: '근거 충분성', value: result.verifier?.evidenceSufficient ? '충분' : '보강 필요' },
+      { label: '인용 무결성', value: result.verifier?.citationIntegrity ? '확인됨' : '미흡' },
+      { label: '클레임 지원', value: formatSupportLevel(result.claim_support?.overall ?? 'missing') },
+    ],
+    factHighlights,
+    {
+      reference_library: result.reference_library,
+      law_reference_library: result.law_reference_library,
+      precedent_reference_library: result.precedent_reference_library,
+    },
+    result.summary_grounding,
+  );
+}
+
 function splitReferenceGroups(references: DetailReference[]) {
   const law = references.filter((reference) => reference.kind === 'law');
   const precedent = references.filter((reference) => reference.kind === 'precedent');
@@ -890,6 +1112,9 @@ function normalizeAnalysisResult(
     risk_level: Number(result.risk_level ?? 0),
     summary: getText(result.summary) || '분석 결과',
     summary_grounding: normalizeGrounding((result as Record<string, unknown>).summary_grounding ?? (result as Record<string, unknown>).summaryGrounding),
+    fact_sheet: normalizeFactSheet(result.fact_sheet),
+    claim_support: normalizeClaimSupport(result.claim_support),
+    verifier: normalizeVerifier(result.verifier),
     profile_guidance: normalizeProfileGuidance(
       result.profile_guidance ?? result.profile_context ?? result.user_profile,
     ),
@@ -1043,6 +1268,44 @@ function normalizeCompletedAnalysisResponse(response: unknown): AnalysisResult |
     source;
 
   return normalizeAnalysisResult(source as AnalysisLegalResultWithProfile, collectReferenceItems(referenceSource));
+}
+
+function normalizeRuntimeTrust(response: unknown): RuntimeTrustInfo {
+  const record = isRecord(response) ? response : {};
+  const meta = isRecord(record.meta) ? record.meta : {};
+  const providerMode = getText(meta.provider_mode) || RUNTIME_MODE;
+  const rawSource = getText(meta.provider_source).toLowerCase();
+  const providerSource: RuntimeTrustInfo['providerSource'] =
+    rawSource === 'live' || rawSource === 'live_fallback' || rawSource === 'fixture'
+      ? rawSource
+      : providerMode === 'live'
+        ? 'live'
+        : 'fixture';
+  const notice =
+    getText(meta.provider_notice) ||
+    (providerSource === 'live'
+      ? '이번 응답은 실제 provider 결과를 공용 계약으로 정규화해 표시했습니다.'
+      : providerSource === 'live_fallback'
+        ? '이번 응답은 live 모드 요청이었지만 실제 provider가 연결되지 않아 fixture 결과로 대체됐습니다.'
+        : '이번 응답은 mock fixture 기준 결과입니다.');
+
+  return {
+    providerMode,
+    providerSource,
+    notice,
+  };
+}
+
+function getRuntimeTrustHeadline(trust: RuntimeTrustInfo) {
+  if (trust.providerSource === 'live') {
+    return '실제 provider 조회 결과';
+  }
+
+  if (trust.providerSource === 'live_fallback') {
+    return 'fixture fallback 결과';
+  }
+
+  return trust.providerMode === 'live' ? 'fixture 기준 응답' : 'mock fixture 결과';
 }
 
 function unwrapCompletedAnalysis(value: unknown): unknown {
@@ -1214,10 +1477,12 @@ export default function App() {
   const [agentProgress, setAgentProgress] = useState<string[]>([]);
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [resultRuntimeTrust, setResultRuntimeTrust] = useState<RuntimeTrustInfo | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<DetailPanelData | null>(null);
   const [keywordText, setKeywordText] = useState('');
   const [keywordResult, setKeywordResult] = useState<AnalysisResult | null>(null);
+  const [keywordRuntimeTrust, setKeywordRuntimeTrust] = useState<RuntimeTrustInfo | null>(null);
   const [keywordError, setKeywordError] = useState<string | null>(null);
   const [keywordLoading, setKeywordLoading] = useState(false);
   const [selectedKeywordDetail, setSelectedKeywordDetail] = useState<DetailPanelData | null>(null);
@@ -1422,6 +1687,15 @@ export default function App() {
         result.precedent_reference_library?.length ? `판례 ${result.precedent_reference_library.length}건` : '',
       ].filter((item): item is string => item.length > 0)
     : [];
+  const trustSignalSummary = result
+    ? [
+        result.verifier ? formatVerifierStatus(result.verifier.status) : '',
+        result.claim_support ? `클레임 ${formatSupportLevel(result.claim_support.overall)}` : '',
+        result.fact_sheet?.missingPoints.length ? `보강 필요 ${result.fact_sheet.missingPoints.length}개` : '',
+        result.fact_sheet?.unsupportedPoints.length ? `미확인 ${result.fact_sheet.unsupportedPoints.length}개` : '',
+      ].filter((item): item is string => item.length > 0)
+    : [];
+  const claimSupportPreview = result?.claim_support?.entries.slice(0, 4) ?? [];
 
   function closeAnalysisStream() {
     const currentStream = analysisStreamRef.current;
@@ -1479,7 +1753,8 @@ export default function App() {
     if (ocrReview) {
       setCurrentRun((prev) => (prev ? { ...prev, ocrReview } : prev));
     }
-    setResult(mergeProfileResult(analysis, responseRecord));
+    setResultRuntimeTrust(normalizeRuntimeTrust(responseRecord));
+    setResult({ ...mergeProfileResult(analysis, responseRecord), runtimeTrust: normalizeRuntimeTrust(responseRecord) });
     setPendingAnalysis(null);
     setActiveHistoryCaseId(
       typeof responseRecord.case_id === 'string' ? responseRecord.case_id : null,
@@ -1563,7 +1838,11 @@ export default function App() {
           }
 
           try {
-            const response = await fetchAnalysisResult(ANALYSIS_BASE_URL, jobId);
+            const resultPath =
+              typeof startResponse.result_url === 'string' && startResponse.result_url
+                ? startResponse.result_url
+                : `/api/analyze/${encodeURIComponent(jobId)}`;
+            const response = await fetchAnalysisResult(ANALYSIS_BASE_URL, resultPath);
             if (normalizeCompletedAnalysisResponse(response)) {
               settled = true;
               closeStream();
@@ -1715,7 +1994,8 @@ export default function App() {
 
       syncGuestQuota(response as Record<string, unknown>, token);
 
-      setKeywordResult(mergeProfileResult(analysis, response));
+      setKeywordRuntimeTrust(normalizeRuntimeTrust(response));
+      setKeywordResult({ ...mergeProfileResult(analysis, response), runtimeTrust: normalizeRuntimeTrust(response) });
       setPendingKeyword(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : '검증 중 오류가 발생했습니다.';
@@ -1866,6 +2146,7 @@ export default function App() {
     setComposerMode('text');
     clearImageSelection();
     setResult(null);
+    setResultRuntimeTrust(null);
     setAgentProgress([]);
     setActiveAgentId(null);
     setActiveJobId(null);
@@ -1875,6 +2156,8 @@ export default function App() {
     setAnalysisError(null);
     setSelectedDetail(null);
     setKeywordResult(null);
+    setKeywordRuntimeTrust(null);
+    setKeywordRuntimeTrust(null);
     setSelectedKeywordDetail(null);
     setKeywordError(null);
     setView('input');
@@ -2026,7 +2309,8 @@ export default function App() {
         throw new Error('저장된 분석 결과를 다시 불러오지 못했습니다.');
       }
 
-      setResult(mergeProfileResult(analysis, response as Record<string, unknown>));
+      setResultRuntimeTrust(normalizeRuntimeTrust(response as Record<string, unknown>));
+      setResult({ ...mergeProfileResult(analysis, response as Record<string, unknown>), runtimeTrust: normalizeRuntimeTrust(response as Record<string, unknown>) });
       setCurrentRun({
         inputMode: item.inputMode === 'image' ? 'image' : 'text',
         contextType: item.contextType,
@@ -2370,6 +2654,13 @@ export default function App() {
               <p className="keyword-result-sub">
                 <strong>{keywordText.trim()}</strong> 기준으로 가까운 법령과 판례를 바로 묶었습니다.
               </p>
+              {keywordRuntimeTrust && (
+                <p className="runtime-panel-copy">
+                  <strong>{getRuntimeTrustHeadline(keywordRuntimeTrust)}</strong>
+                  {' '}
+                  {keywordRuntimeTrust.notice}
+                </p>
+              )}
             </div>
             <span className="keyword-result-pill">
               {keywordResult.charges.length + keywordResult.precedent_cards.length}개 매칭
@@ -2535,6 +2826,13 @@ export default function App() {
                 ? '형사 고소 또는 민사 손해배상을 검토해볼 수 있습니다.'
                 : '현재 입력 기준으로 명확한 법적 쟁점이 식별되지 않았습니다.'}
             </p>
+            {resultRuntimeTrust && (
+              <p className="runtime-panel-copy">
+                <strong>{getRuntimeTrustHeadline(resultRuntimeTrust)}</strong>
+                {' '}
+                {resultRuntimeTrust.notice}
+              </p>
+            )}
             {provenanceSummary.length > 0 && (
               <div className="provenance-chip-row">
                 {provenanceSummary.map((item) => (

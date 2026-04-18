@@ -9,6 +9,7 @@ export interface AnalysisJobEvent {
 
 export interface AnalysisJobSnapshot {
   id: string;
+  accessToken: string;
   status: AnalysisJobStatus;
   createdAt: string;
   updatedAt: string;
@@ -38,6 +39,7 @@ function now(): string {
 function cloneJob(job: AnalysisJobRecord): AnalysisJobSnapshot {
   return {
     id: job.id,
+    accessToken: job.accessToken,
     status: job.status,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
@@ -71,6 +73,7 @@ export function createAnalysisJobManager(): AnalysisJobManager {
       const createdAt = now();
       const job: AnalysisJobRecord = {
         id: randomUUID(),
+        accessToken: randomUUID(),
         status: "pending",
         createdAt,
         updatedAt: createdAt,
