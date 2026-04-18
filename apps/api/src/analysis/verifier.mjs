@@ -11,6 +11,33 @@ function hasCitationMap(retrievalEvidencePack) {
     && retrievalEvidencePack.citation_map.citations.length > 0;
 }
 
+function normalizeClaimSupport(claimSupport) {
+  const entries = Array.isArray(claimSupport?.entries) ? claimSupport.entries : [];
+  const counts = entries.reduce((accumulator, entry) => {
+    const level = entry?.support_level;
+    if (level === "direct") accumulator.direct += 1;
+    else if (level === "partial") accumulator.partial += 1;
+    else accumulator.missing += 1;
+    return accumulator;
+  }, { direct: 0, partial: 0, missing: 0 });
+
+  const overall = counts.missing > 0
+    ? "missing"
+    : counts.partial > 0
+      ? "partial"
+      : counts.direct > 0
+        ? "direct"
+        : "missing";
+
+  return {
+    overall,
+    direct_count: counts.direct,
+    partial_count: counts.partial,
+    missing_count: counts.missing,
+    entries
+  };
+}
+
 function buildConfidenceCalibration(evidenceStrength, scopeAssessment) {
   let score = evidenceStrength === "high" ? 0.84 : evidenceStrength === "medium" ? 0.62 : 0.34;
 
@@ -30,7 +57,8 @@ export function buildPreAnalysisVerifier({
   retrievalPlan,
   retrievalEvidencePack,
   scopeAssessment,
-  evidencePack
+  evidencePack,
+  claimSupport
 }) {
   const selectedReferenceIds = Array.isArray(retrievalEvidencePack?.selected_reference_ids)
     ? retrievalEvidencePack.selected_reference_ids.filter(Boolean)
@@ -55,6 +83,7 @@ export function buildPreAnalysisVerifier({
     || (evidenceStrength === "medium" && selectedReferenceIds.length >= 1)
   ) && !Boolean(scopeAssessment?.insufficient_facts);
   const confidenceCalibration = buildConfidenceCalibration(evidenceStrength, scopeAssessment);
+  const normalizedClaimSupport = normalizeClaimSupport(claimSupport);
   const warnings = [];
 
   if (!evidenceSufficient) {
@@ -66,6 +95,11 @@ export function buildPreAnalysisVerifier({
   if (contradictionDetected) {
     warnings.push("지원 범위 밖 이슈와 내부 쟁점 가설 사이에 충돌 가능성이 있습니다.");
   }
+  if (normalizedClaimSupport.missing_count > 0) {
+    warnings.push("일부 최종 판단 문장에 직접 연결된 근거가 없어 표현을 더 보수적으로 유지해야 합니다.");
+  } else if (normalizedClaimSupport.partial_count > 0) {
+    warnings.push("일부 최종 판단 문장은 근거가 부분 연결 상태라 단정적 표현을 피하는 편이 안전합니다.");
+  }
 
   return {
     stage: "pre_analysis_verifier",
@@ -76,6 +110,7 @@ export function buildPreAnalysisVerifier({
     confidence_calibration: confidenceCalibration,
     selected_reference_count: selectedReferenceIds.length,
     issue_count: issueTypes.length,
+    claim_support: normalizedClaimSupport,
     warnings: unique(warnings)
   };
 }

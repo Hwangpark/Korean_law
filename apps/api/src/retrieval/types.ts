@@ -101,6 +101,27 @@ export interface EvidenceCitationMap {
   by_statement_path: Record<string, string[]>;
 }
 
+export interface ClaimSupportEntry {
+  claim_type: "summary" | "charge";
+  claim_path: string;
+  title: string;
+  support_level: "direct" | "partial" | "missing";
+  citation_ids: string[];
+  reference_ids: string[];
+  evidence_count: number;
+  precedent_count?: number;
+  has_snippet?: boolean;
+  match_reason?: string;
+}
+
+export interface ClaimSupportSummary {
+  overall: "direct" | "partial" | "missing";
+  direct_count: number;
+  partial_count: number;
+  missing_count: number;
+  entries: ClaimSupportEntry[];
+}
+
 export interface RetrievalEvidenceSeed {
   reference_key: string;
   kind: "law" | "precedent";
@@ -402,6 +423,7 @@ export interface KeywordVerificationResponse {
     }>;
     recommended_actions: string[];
     evidence_to_collect: string[];
+    claim_support?: ClaimSupportSummary;
     precedent_cards: Array<{
       case_no: string;
       court: string;
@@ -426,6 +448,21 @@ export interface KeywordVerificationResponse {
     precedent_reference_library: ReferenceLibraryItem[];
     profile_context?: ProfileContext;
     profile_considerations?: string[];
+    verifier?: {
+      stage: string;
+      status: string;
+      evidence_sufficient: boolean;
+      citation_integrity: boolean;
+      contradiction_detected: boolean;
+      selected_reference_count: number;
+      issue_count: number;
+      confidence_calibration: {
+        score: number;
+        label: string;
+      };
+      claim_support?: ClaimSupportSummary;
+      warnings: string[];
+    };
   };
   law_reference_library: ReferenceLibraryItem[];
   precedent_reference_library: ReferenceLibraryItem[];

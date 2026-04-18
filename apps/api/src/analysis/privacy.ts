@@ -94,6 +94,17 @@ function sanitizeClassifierExtraction(value: unknown): Record<string, unknown> {
   };
 }
 
+function sanitizeOcrReview(value: unknown): Record<string, unknown> {
+  const record = asRecord(value);
+  return {
+    status: asString(record.status, "not_needed"),
+    confidence_score: typeof record.confidence_score === "number" ? asNumber(record.confidence_score) : null,
+    requires_human_review: asBoolean(record.requires_human_review),
+    reasons: sanitizeStringArray(record.reasons),
+    recommended_action: asNullableString(record.recommended_action)
+  };
+}
+
 function sanitizeIssueList(value: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) {
     return [];
@@ -203,6 +214,35 @@ function sanitizePublicSearchStageResult(
   };
 }
 
+function sanitizeClaimSupport(value: unknown): Record<string, unknown> {
+  const record = asRecord(value);
+  const entries = Array.isArray(record.entries)
+    ? record.entries
+      .map((item) => asRecord(item))
+      .map((item) => ({
+        claim_type: asString(item.claim_type),
+        claim_path: asString(item.claim_path),
+        title: asString(item.title),
+        support_level: asString(item.support_level),
+        citation_ids: sanitizeStringArray(item.citation_ids),
+        reference_ids: sanitizeStringArray(item.reference_ids),
+        evidence_count: asNumber(item.evidence_count),
+        precedent_count: asNumber(item.precedent_count),
+        has_snippet: asBoolean(item.has_snippet),
+        match_reason: asString(item.match_reason)
+      }))
+      .filter((item) => item.claim_path || item.title)
+    : [];
+
+  return {
+    overall: asString(record.overall),
+    direct_count: asNumber(record.direct_count),
+    partial_count: asNumber(record.partial_count),
+    missing_count: asNumber(record.missing_count),
+    entries
+  };
+}
+
 function sanitizeVerifier(value: unknown): Record<string, unknown> {
   const record = asRecord(value);
   const confidence = asRecord(record.confidence_calibration);
@@ -218,6 +258,7 @@ function sanitizeVerifier(value: unknown): Record<string, unknown> {
       score: asNumber(confidence.score),
       label: asString(confidence.label)
     },
+    claim_support: sanitizeClaimSupport(record.claim_support),
     warnings: sanitizeStringArray(record.warnings)
   };
 }
@@ -469,6 +510,7 @@ function sanitizePublicLegalAnalysis(value: unknown): Record<string, unknown> {
     next_steps: sanitizeStringArray(record.next_steps),
     profile_considerations: sanitizeStringArray(record.profile_considerations),
     scope_assessment: sanitizeScopeAssessment(record.scope_assessment),
+    claim_support: sanitizeClaimSupport(record.claim_support),
     verifier: sanitizeVerifier(record.verifier),
     safety_gate: sanitizeSafetyGate(record.safety_gate),
     grounding_evidence: sanitizeGroundingEvidenceSummary(record.grounding_evidence),
@@ -490,6 +532,7 @@ function sanitizeStoredLegalAnalysis(value: unknown): Record<string, unknown> {
     recommended_actions: publicShape.recommended_actions,
     evidence_to_collect: publicShape.evidence_to_collect,
     scope_assessment: publicShape.scope_assessment,
+    claim_support: publicShape.claim_support,
     verifier: publicShape.verifier,
     safety_gate: publicShape.safety_gate,
     grounding_evidence: publicShape.grounding_evidence,
@@ -526,7 +569,8 @@ export function buildPublicAgentResult(agent: string, result: unknown): Record<s
     case "ocr":
       return {
         source_type: asString(record.source_type, "unknown"),
-        utterance_count: Array.isArray(record.utterances) ? record.utterances.length : 0
+        utterance_count: Array.isArray(record.utterances) ? record.utterances.length : 0,
+        review: sanitizeOcrReview(record.review)
       };
     case "classifier": {
       const issues = Array.isArray(record.issues)

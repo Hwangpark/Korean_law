@@ -221,6 +221,38 @@ function sanitizeGroundingEvidenceSummary(value: unknown): Record<string, unknow
   };
 }
 
+function sanitizeClaimSupport(value: unknown): Record<string, unknown> {
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+
+  return {
+    overall: sanitizeString(record.overall),
+    direct_count: sanitizeNumber(record.direct_count),
+    partial_count: sanitizeNumber(record.partial_count),
+    missing_count: sanitizeNumber(record.missing_count),
+    entries: Array.isArray(record.entries)
+      ? record.entries
+        .map((item) => (item && typeof item === "object" && !Array.isArray(item)
+          ? item as Record<string, unknown>
+          : {}))
+        .map((item) => ({
+          claim_type: sanitizeString(item.claim_type),
+          claim_path: sanitizeString(item.claim_path),
+          title: sanitizeString(item.title),
+          support_level: sanitizeString(item.support_level),
+          citation_ids: sanitizeStringArray(item.citation_ids),
+          reference_ids: sanitizeStringArray(item.reference_ids),
+          evidence_count: sanitizeNumber(item.evidence_count),
+          precedent_count: sanitizeNumber(item.precedent_count),
+          has_snippet: sanitizeBoolean(item.has_snippet),
+          match_reason: sanitizeString(item.match_reason)
+        }))
+        .filter((item) => item.claim_path || item.title)
+      : []
+  };
+}
+
 function sanitizeQueryRefs(value: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) {
     return [];
@@ -388,6 +420,7 @@ function sanitizePublicLegalAnalysis(
       warnings: sanitizeStringArray(legalAnalysis?.scope_assessment?.warnings)
     },
     grounding_evidence: sanitizeGroundingEvidenceSummary(legalAnalysis?.grounding_evidence),
+    claim_support: sanitizeClaimSupport(legalAnalysis?.claim_support),
     selected_reference_ids: sanitizeStringArray(legalAnalysis?.selected_reference_ids),
     charges: sanitizePublicCharges(legalAnalysis?.charges),
     recommended_actions: sanitizeStringArray(legalAnalysis?.recommended_actions),
