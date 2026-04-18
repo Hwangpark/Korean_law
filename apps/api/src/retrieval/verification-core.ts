@@ -36,6 +36,7 @@ export interface LegalAnalysisPayloadInput {
   disclaimer: string;
   riskLevel: number;
   profileConsiderations: string[];
+  verifier?: NonNullable<KeywordVerificationResponse["legal_analysis"]["verifier"]>;
 }
 
 export interface ReferencePayloadInput {
@@ -329,7 +330,8 @@ export function buildLegalAnalysisPayload(
     law_reference_library: input.matchedLaws.map((item) => item.reference),
     precedent_reference_library: input.matchedPrecedents.map((item) => item.reference),
     ...(input.request.profileContext ? { profile_context: input.request.profileContext } : {}),
-    ...(input.profileConsiderations.length > 0 ? { profile_considerations: input.profileConsiderations } : {})
+    ...(input.profileConsiderations.length > 0 ? { profile_considerations: input.profileConsiderations } : {}),
+    ...(input.verifier ? { verifier: input.verifier } : {})
   };
 }
 

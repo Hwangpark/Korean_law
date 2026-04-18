@@ -123,6 +123,7 @@ function assertCurrentRetrievalPrecursors(response: KeywordVerificationResponse)
     response.reference_library.items.length >= response.matched_laws.length + response.matched_precedents.length,
     "reference library should cover the matched retrieval references"
   );
+  assert.ok(response.legal_analysis.verifier, "keyword verification response should expose pre-analysis verifier metadata");
 }
 
 function assertPackIsolation(response: KeywordVerificationResponse, pack: ConcreteRetrievalEvidencePack): void {
@@ -143,6 +144,25 @@ function assertLegalAnalysisCitationCoverage(response: KeywordVerificationRespon
   const citationMap = response.legal_analysis.citation_map;
   assert.ok(citationMap, "legal_analysis should expose citation_map");
   assert.equal(citationMap.version, "v2", "legal_analysis citation_map should keep v2 contract");
+
+  const verifier = response.legal_analysis.verifier;
+  assert.ok(verifier, "legal_analysis should include verifier snapshot");
+  assert.equal(verifier.stage, "pre_analysis_verifier", "verifier should expose the pre-analysis stage name");
+  assert.equal(
+    verifier.selected_reference_count,
+    response.retrieval_evidence_pack.selected_reference_ids.length,
+    "verifier should count the same selected references as the retrieval evidence pack"
+  );
+  assert.equal(
+    verifier.issue_count,
+    response.plan.candidate_issues.length,
+    "verifier should track the same candidate issue count as the response plan"
+  );
+  assert.equal(
+    verifier.evidence_sufficient,
+    response.legal_analysis.grounding_evidence?.evidence_strength !== "low",
+    "verifier evidence sufficiency should stay aligned with grounding evidence strength for well-scoped fixtures"
+  );
 
   const summaryCitations = citationMap.citations.filter((citation) => citation.statement_path === "legal_analysis.summary");
   assert.ok(summaryCitations.length > 0, "summary should retain at least one supporting citation");

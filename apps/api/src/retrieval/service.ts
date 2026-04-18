@@ -64,6 +64,7 @@ interface VerificationArtifacts {
   retrievalEvidencePack: KeywordVerificationResponse["retrieval_evidence_pack"];
   scopeAssessment: NonNullable<KeywordVerificationResponse["legal_analysis"]["scope_assessment"]>;
   groundingEvidence: NonNullable<KeywordVerificationResponse["legal_analysis"]["grounding_evidence"]>;
+  verifier: NonNullable<KeywordVerificationResponse["legal_analysis"]["verifier"]>;
 }
 
 async function buildVerificationArtifacts(input: {
@@ -92,7 +93,8 @@ async function buildVerificationArtifacts(input: {
     allReferences: canonicalArtifacts.allReferences,
     retrievalEvidencePack: canonicalArtifacts.retrievalEvidencePack,
     scopeAssessment: canonicalArtifacts.scopeAssessment,
-    groundingEvidence: canonicalArtifacts.groundingEvidence
+    groundingEvidence: canonicalArtifacts.groundingEvidence,
+    verifier: canonicalArtifacts.verifier
   };
 }
 
@@ -124,7 +126,8 @@ export function createKeywordVerificationService(
         allReferences,
         retrievalEvidencePack,
         scopeAssessment,
-        groundingEvidence
+        groundingEvidence,
+        verifier
       } = await buildVerificationArtifacts({
         providerMode: effectiveProviderMode,
         plan,
@@ -174,7 +177,8 @@ export function createKeywordVerificationService(
           summary: headline,
           disclaimer: VERIFICATION_DISCLAIMER,
           riskLevel,
-          profileConsiderations
+          profileConsiderations,
+          verifier
         })
       };
 
