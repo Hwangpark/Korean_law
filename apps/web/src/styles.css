@@ -1265,6 +1265,7 @@ body {
   border-color: rgba(148,163,184,.26);
 }
 
+.trust-chip-warning,
 .trust-chip-needs_caution,
 .trust-chip-partial,
 .trust-chip-missing {
@@ -1273,6 +1274,7 @@ body {
   border-color: rgba(217,119,6,.2);
 }
 
+.trust-chip-passed,
 .trust-chip-ready,
 .trust-chip-direct {
   background: var(--green-light);
@@ -1448,6 +1450,7 @@ body {
   color: var(--ink-mid);
 }
 
+.trust-status-passed,
 .trust-status-ready,
 .trust-support-direct {
   background: var(--green-light);
@@ -1455,6 +1458,7 @@ body {
   border-color: rgba(22,163,74,.18);
 }
 
+.trust-status-warning,
 .trust-status-needs_caution,
 .trust-support-partial,
 .trust-support-missing {

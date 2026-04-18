@@ -990,8 +990,11 @@ function normalizeVerifier(value: unknown): VerifierSummary | null {
 }
 
 function formatVerifierStatus(status: string) {
-  if (status === 'ready') {
+  if (status === 'ready' || status === 'passed') {
     return '검증 통과';
+  }
+  if (status === 'warning') {
+    return '주의 신호';
   }
   if (status === 'needs_caution') {
     return '주의 필요';
