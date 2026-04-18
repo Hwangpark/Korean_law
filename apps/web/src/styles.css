@@ -1239,6 +1239,10 @@ body {
   margin-bottom: 10px;
 }
 
+.provenance-chip-row-secondary {
+  margin-top: 8px;
+}
+
 .provenance-chip {
   display: inline-flex;
   align-items: center;
@@ -1253,6 +1257,27 @@ body {
 
 .provenance-chip-strong {
   background: var(--blue-light);
+}
+
+.provenance-chip-soft {
+  background: rgba(15,23,42,.04);
+  color: var(--ink-mid);
+  border-color: rgba(148,163,184,.26);
+}
+
+.trust-chip-needs_caution,
+.trust-chip-partial,
+.trust-chip-missing {
+  background: var(--amber-light);
+  color: var(--amber);
+  border-color: rgba(217,119,6,.2);
+}
+
+.trust-chip-ready,
+.trust-chip-direct {
+  background: var(--green-light);
+  color: var(--green);
+  border-color: rgba(22,163,74,.18);
 }
 
 .provenance-inline-copy {
@@ -1378,6 +1403,145 @@ body {
 .provenance-overview-section {
   display: grid;
   gap: 14px;
+}
+
+.trust-panel-section {
+  display: grid;
+  gap: 14px;
+}
+
+.trust-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.trust-panel-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--r);
+  border: 1px solid rgba(15,23,42,.08);
+  background: linear-gradient(180deg, #fff, #f8fbff);
+}
+
+.trust-panel-status-row,
+.trust-claim-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.trust-status-pill,
+.trust-score-pill,
+.trust-support-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  border: 1px solid rgba(148,163,184,.24);
+  background: rgba(15,23,42,.04);
+  color: var(--ink-mid);
+}
+
+.trust-status-ready,
+.trust-support-direct {
+  background: var(--green-light);
+  color: var(--green);
+  border-color: rgba(22,163,74,.18);
+}
+
+.trust-status-needs_caution,
+.trust-support-partial,
+.trust-support-missing {
+  background: var(--amber-light);
+  color: var(--amber);
+  border-color: rgba(217,119,6,.2);
+}
+
+.trust-check-grid,
+.trust-panel-mini-grid,
+.trust-claim-list,
+.trust-warning-list {
+  display: grid;
+  gap: 10px;
+}
+
+.trust-check-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.trust-check-item,
+.trust-mini-block,
+.trust-warning-item,
+.trust-claim-item {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font-size: 0.8rem;
+  color: var(--ink-mid);
+}
+
+.trust-check-item.is-pass {
+  color: var(--green);
+  background: var(--green-light);
+  border-color: rgba(22,163,74,.16);
+}
+
+.trust-check-item.is-warn,
+.trust-mini-block-amber,
+.trust-mini-block-red {
+  color: var(--amber);
+  background: var(--amber-light);
+  border-color: rgba(217,119,6,.16);
+}
+
+.trust-mini-block-red {
+  color: var(--red);
+  background: var(--red-light);
+  border-color: rgba(220,38,38,.14);
+}
+
+.trust-mini-block-blue {
+  color: var(--navy);
+  background: var(--blue-light);
+  border-color: rgba(37,99,235,.14);
+}
+
+.trust-mini-block strong,
+.trust-claim-item strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--ink);
+  font-size: 0.82rem;
+}
+
+.trust-mini-block ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.trust-warning-item {
+  color: var(--amber);
+}
+
+.trust-claim-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.trust-claim-item p {
+  font-size: 0.76rem;
+  color: var(--ink-mid);
 }
 
 .provenance-overview-head {
@@ -2198,8 +2362,14 @@ body {
     flex-direction: column;
   }
 
-  .provenance-overview-head {
+  .provenance-overview-head,
+  .trust-panel-head,
+  .trust-claim-item {
     flex-direction: column;
+  }
+
+  .trust-check-grid {
+    grid-template-columns: 1fr;
   }
 
   .detail-panel-head {

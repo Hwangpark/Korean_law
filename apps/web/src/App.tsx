@@ -2661,6 +2661,23 @@ export default function App() {
                   {keywordRuntimeTrust.notice}
                 </p>
               )}
+              {(keywordResult.verifier || keywordResult.claim_support) && (
+                <div className="provenance-chip-row provenance-chip-row-secondary">
+                  {keywordResult.verifier && (
+                    <span className={`provenance-chip provenance-chip-soft trust-chip-${keywordResult.verifier.status}`}>
+                      {formatVerifierStatus(keywordResult.verifier.status)} · {formatConfidenceLabel(keywordResult.verifier.confidenceLabel)}
+                    </span>
+                  )}
+                  {keywordResult.claim_support && (
+                    <span className={`provenance-chip provenance-chip-soft trust-chip-${keywordResult.claim_support.overall}`}>
+                      클레임 {formatSupportLevel(keywordResult.claim_support.overall)}
+                    </span>
+                  )}
+                  {keywordResult.fact_sheet?.missingPoints.length ? (
+                    <span className="provenance-chip provenance-chip-soft trust-chip-missing">빠진 사실 {keywordResult.fact_sheet.missingPoints.length}개</span>
+                  ) : null}
+                </div>
+              )}
             </div>
             <span className="keyword-result-pill">
               {keywordResult.charges.length + keywordResult.precedent_cards.length}개 매칭
@@ -2837,6 +2854,15 @@ export default function App() {
               <div className="provenance-chip-row">
                 {provenanceSummary.map((item) => (
                   <span key={item} className="provenance-chip">
+                    {item}
+                  </span>
+                ))}
+              </div>
+            )}
+            {trustSignalSummary.length > 0 && (
+              <div className="provenance-chip-row provenance-chip-row-secondary">
+                {trustSignalSummary.map((item) => (
+                  <span key={item} className="provenance-chip provenance-chip-soft">
                     {item}
                   </span>
                 ))}
@@ -3186,6 +3212,105 @@ export default function App() {
         </div>
 
         <div className="results-col results-col-side">
+          {(result.fact_sheet || result.claim_support || result.verifier) && (
+            <section className="result-section trust-panel-section">
+              <div className="trust-panel-head">
+                <div>
+                  <h3 className="section-title">사실 · 검증 신호</h3>
+                  <p className="detail-panel-sub">핵심 사실, 빠진 사실, 검증 상태를 메인 판단 옆에서만 간단히 보여줍니다.</p>
+                </div>
+                <button className="card-detail-btn" type="button" onClick={() => setSelectedDetail(buildTrustDetail(result))}>
+                  상세 보기
+                </button>
+              </div>
+
+              {result.verifier && (
+                <div className="trust-panel-card">
+                  <div className="trust-panel-status-row">
+                    <span className={`trust-status-pill trust-status-${result.verifier.status}`}>{formatVerifierStatus(result.verifier.status)}</span>
+                    <span className="trust-score-pill">신뢰도 {Math.round(result.verifier.confidenceScore * 100)}% · {formatConfidenceLabel(result.verifier.confidenceLabel)}</span>
+                  </div>
+                  <div className="trust-check-grid">
+                    <div className={`trust-check-item ${result.verifier.evidenceSufficient ? 'is-pass' : 'is-warn'}`}>근거 {result.verifier.evidenceSufficient ? '충분' : '보강 필요'}</div>
+                    <div className={`trust-check-item ${result.verifier.citationIntegrity ? 'is-pass' : 'is-warn'}`}>인용 {result.verifier.citationIntegrity ? '정상' : '재확인 필요'}</div>
+                    <div className={`trust-check-item ${result.verifier.contradictionDetected ? 'is-warn' : 'is-pass'}`}>{result.verifier.contradictionDetected ? '모순 감지' : '큰 모순 없음'}</div>
+                    <div className="trust-check-item">선정 근거 {result.verifier.selectedReferenceCount}건</div>
+                  </div>
+                  {result.verifier.warnings.length > 0 && (
+                    <div className="trust-warning-list">
+                      {result.verifier.warnings.slice(0, 3).map((warning) => (
+                        <div key={warning} className="trust-warning-item">{warning}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {result.fact_sheet && (
+                <div className="trust-panel-card">
+                  <div className="trust-panel-mini-grid">
+                    {result.fact_sheet.keyPoints.length > 0 && (
+                      <div className="trust-mini-block">
+                        <strong>핵심 사실</strong>
+                        <ul>
+                          {result.fact_sheet.keyPoints.slice(0, 3).map((item) => <li key={item}>{item}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    {result.fact_sheet.missingPoints.length > 0 && (
+                      <div className="trust-mini-block trust-mini-block-amber">
+                        <strong>빠진 사실</strong>
+                        <ul>
+                          {result.fact_sheet.missingPoints.slice(0, 3).map((item) => <li key={item}>{item}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    {result.fact_sheet.unsupportedPoints.length > 0 && (
+                      <div className="trust-mini-block trust-mini-block-red">
+                        <strong>미확인 주장</strong>
+                        <ul>
+                          {result.fact_sheet.unsupportedPoints.slice(0, 3).map((item) => <li key={item}>{item}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    {result.fact_sheet.recommendedFocus.length > 0 && (
+                      <div className="trust-mini-block trust-mini-block-blue">
+                        <strong>다음 확인 포인트</strong>
+                        <ul>
+                          {result.fact_sheet.recommendedFocus.slice(0, 3).map((item) => <li key={item}>{item}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {result.claim_support && (
+                <div className="trust-panel-card">
+                  <div className="trust-claim-summary">
+                    <span className={`trust-support-pill trust-support-${result.claim_support.overall}`}>{formatSupportLevel(result.claim_support.overall)}</span>
+                    <span>직접 {result.claim_support.directCount}</span>
+                    <span>부분 {result.claim_support.partialCount}</span>
+                    <span>부족 {result.claim_support.missingCount}</span>
+                  </div>
+                  {claimSupportPreview.length > 0 && (
+                    <div className="trust-claim-list">
+                      {claimSupportPreview.map((entry) => (
+                        <div key={`${entry.claimPath}-${entry.title}`} className="trust-claim-item">
+                          <div>
+                            <strong>{entry.title}</strong>
+                            {entry.matchReason && <p>{entry.matchReason}</p>}
+                          </div>
+                          <span className={`trust-support-pill trust-support-${entry.supportLevel}`}>{formatSupportLevel(entry.supportLevel)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
+
           <section className="result-section result-detail-panel" ref={detailPanelRef}>
             <DetailPanel
               data={selectedDetail}
