@@ -1,3 +1,11 @@
+export type OcrReviewSnapshot = {
+  status: 'ok' | 'review' | 'uncertain' | 'not_needed';
+  confidenceScore?: number | null;
+  requiresHumanReview: boolean;
+  reasons: string[];
+  recommendedAction?: string | null;
+};
+
 export type RuntimeTimelineItem = {
   agentId: string;
   label: string;
@@ -14,6 +22,7 @@ export type AnalysisRunSnapshot = {
   submittedAt: string;
   textLength: number;
   imageName?: string;
+  ocrReview?: OcrReviewSnapshot | null;
 };
 
 export type DetailReference = {

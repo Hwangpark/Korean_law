@@ -1,5 +1,5 @@
 import type { AnalysisHistoryItem } from '../lib/auth';
-import type { AnalysisRunSnapshot, RuntimeTimelineItem } from '../types/app-ui';
+import type { AnalysisRunSnapshot, OcrReviewSnapshot, RuntimeTimelineItem } from '../types/app-ui';
 
 type RuntimeDashboardProps = {
   currentRun: AnalysisRunSnapshot | null;
@@ -25,6 +25,14 @@ export function RuntimeDashboard({
   formatDuration,
 }: RuntimeDashboardProps) {
   const hasRun = Boolean(currentRun || activeJobId);
+  const review = currentRun?.ocrReview ?? null;
+
+  function getReviewLabel(value: OcrReviewSnapshot) {
+    if (value.status === 'ok') return 'OCR 안정';
+    if (value.status === 'review') return '검토 권장';
+    if (value.status === 'uncertain') return '확인 필요';
+    return '텍스트 입력';
+  }
 
   return (
     <section className="runtime-dashboard">
@@ -45,6 +53,25 @@ export function RuntimeDashboard({
                 <span>{formatContextType(currentRun.contextType)}</span>
                 <span>{formatKoreanDateTime(currentRun.submittedAt)}</span>
                 <span>{currentRun.inputMode === 'image' ? currentRun.imageName ?? '이미지 업로드' : `본문 ${currentRun.textLength}자`}</span>
+                {review && (
+                  <span className={`runtime-review-pill runtime-review-pill-${review.status}`}>
+                    {getReviewLabel(review)}
+                    {typeof review.confidenceScore === 'number' ? ` · ${Math.round(review.confidenceScore * 100)}%` : ''}
+                  </span>
+                )}
+              </div>
+            )}
+            {review && review.requiresHumanReview && (
+              <div className="runtime-review-card">
+                <strong>OCR 검토 메모</strong>
+                <p>{review.recommendedAction ?? '원문 이미지와 추출 텍스트를 함께 확인해 주세요.'}</p>
+                {review.reasons.length > 0 && (
+                  <div className="runtime-review-reasons">
+                    {review.reasons.map((reason) => (
+                      <span key={reason}>{reason}</span>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             <div className="runtime-timeline-list">

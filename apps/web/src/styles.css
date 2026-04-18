@@ -2651,6 +2651,59 @@ body {
   margin-bottom: 16px;
 }
 
+.runtime-review-pill-ok {
+  background: var(--green-light);
+  color: var(--green);
+}
+
+.runtime-review-pill-review,
+.runtime-review-pill-uncertain {
+  background: var(--amber-light);
+  color: var(--amber);
+}
+
+.runtime-review-pill-not_needed {
+  background: var(--blue-light);
+  color: var(--navy);
+}
+
+.runtime-review-card {
+  margin-bottom: 16px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(217, 119, 6, 0.18);
+  background: var(--amber-light);
+}
+
+.runtime-review-card strong {
+  display: block;
+  color: var(--ink);
+}
+
+.runtime-review-card p {
+  margin-top: 6px;
+  color: var(--ink-mid);
+  font-size: 13px;
+}
+
+.runtime-review-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.runtime-review-reasons span {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.72);
+  color: #92400e;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .runtime-timeline-list,
 .runtime-history-list {
   display: flex;

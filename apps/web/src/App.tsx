@@ -37,6 +37,7 @@ import type {
   DetailPanelData,
   DetailQueryRef,
   DetailReference,
+  OcrReviewSnapshot,
   RuntimeTimelineItem,
 } from './types/app-ui';
 
@@ -1048,6 +1049,38 @@ function fileToBase64(file: File) {
   });
 }
 
+function normalizeOcrReview(value: unknown): OcrReviewSnapshot | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const status = firstText(value.status);
+  const normalizedStatus =
+    status === 'ok' || status === 'review' || status === 'uncertain' || status === 'not_needed'
+      ? status
+      : null;
+
+  if (!normalizedStatus) {
+    return null;
+  }
+
+  return {
+    status: normalizedStatus,
+    confidenceScore: typeof value.confidence_score === 'number' ? value.confidence_score : null,
+    requiresHumanReview: Boolean(value.requires_human_review),
+    reasons: toTextList(value.reasons),
+    recommendedAction: firstText(value.recommended_action) || null,
+  };
+}
+
+function extractOcrReviewFromPayload(payload: unknown): OcrReviewSnapshot | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  return normalizeOcrReview(payload.review ?? (isRecord(payload.ocr) ? payload.ocr.review : null));
+}
+
 function buildAnalyzeJobPayload(
   snapshot: PendingAnalysis,
   guestId: string | null,
@@ -1352,6 +1385,10 @@ export default function App() {
     const responseRecord = isRecord(response) ? response : {};
     syncGuestQuota(responseRecord, token);
     setActiveAgentId(null);
+    const ocrReview = extractOcrReviewFromPayload(responseRecord);
+    if (ocrReview) {
+      setCurrentRun((prev) => (prev ? { ...prev, ocrReview } : prev));
+    }
     setResult(mergeProfileResult(analysis, responseRecord));
     setPendingAnalysis(null);
     setView('results');
@@ -1481,6 +1518,12 @@ export default function App() {
                 finishedAt,
                 durationMs: typeof payload.duration_ms === 'number' ? payload.duration_ms : undefined,
               });
+              if (payload.agent === 'ocr') {
+                const review = extractOcrReviewFromPayload(payload.result);
+                if (review) {
+                  setCurrentRun((prev) => (prev ? { ...prev, ocrReview: review } : prev));
+                }
+              }
             }
           } catch {
             // Ignore malformed stream payloads.
@@ -2393,7 +2436,30 @@ export default function App() {
             <div className="runtime-meta-item"><span>출처</span><strong>{formatContextType(currentRun.contextType)}</strong></div>
             <div className="runtime-meta-item"><span>분석 시작</span><strong>{formatKoreanDateTime(currentRun.submittedAt)}</strong></div>
             <div className="runtime-meta-item"><span>입력 요약</span><strong>{currentRun.inputMode === 'image' ? currentRun.imageName ?? '이미지 1건' : `${currentRun.textLength}자 텍스트`}</strong></div>
+            {currentRun.ocrReview && (
+              <div className="runtime-meta-item">
+                <span>OCR 검토</span>
+                <strong>
+                  {currentRun.ocrReview.status === 'ok'
+                    ? '안정'
+                    : currentRun.ocrReview.status === 'review'
+                      ? '검토 권장'
+                      : currentRun.ocrReview.status === 'uncertain'
+                        ? '확인 필요'
+                        : '텍스트 입력'}
+                  {typeof currentRun.ocrReview.confidenceScore === 'number'
+                    ? ` · ${Math.round(currentRun.ocrReview.confidenceScore * 100)}%`
+                    : ''}
+                </strong>
+              </div>
+            )}
             <div className="runtime-meta-item runtime-meta-item-wide"><span>타임라인</span><strong>{runtimeTimeline.filter((item) => item.status === 'done').length}단계 완료, {runtimeTimeline.find((item) => item.status === 'active')?.label ?? '모든 단계 종료'}</strong></div>
+            {currentRun.ocrReview?.requiresHumanReview && currentRun.ocrReview.reasons.length > 0 && (
+              <div className="runtime-meta-item runtime-meta-item-wide">
+                <span>검토 포인트</span>
+                <strong>{currentRun.ocrReview.reasons.join(' · ')}</strong>
+              </div>
+            )}
           </div>
         </section>
       )}

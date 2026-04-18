@@ -1030,7 +1030,14 @@ async function main() {
       ocr: {
         source_type: "messenger",
         utterances: [{ speaker: "A", text: "hello" }],
-        raw_text: "should not be public"
+        raw_text: "should not be public",
+        review: {
+          status: "review",
+          confidence_score: 0.44,
+          requires_human_review: true,
+          reasons: ["추출 텍스트가 짧아서 원문 확인이 필요합니다."],
+          recommended_action: "원문 이미지와 추출 텍스트를 함께 확인해 주세요."
+        }
       },
       classification: {
         issues: [{ type: "명예훼손" }],
@@ -1382,6 +1389,17 @@ async function main() {
   );
   assert.equal(publicResult.ocr?.source_type, "messenger", "public analysis response should expose minimal OCR metadata");
   assert.equal("raw_text" in (publicResult.ocr ?? {}), false, "public OCR payload must not expose raw_text");
+  assert.deepEqual(
+    publicResult.ocr?.review,
+    {
+      status: "review",
+      confidence_score: 0.44,
+      requires_human_review: true,
+      reasons: ["추출 텍스트가 짧아서 원문 확인이 필요합니다."],
+      recommended_action: "원문 이미지와 추출 텍스트를 함께 확인해 주세요."
+    },
+    "public OCR payload should expose sanitized review metadata"
+  );
   assert.deepEqual(
     publicResult.classification?.scope_filter,
     {
@@ -1945,7 +1963,14 @@ async function main() {
       at: "t2",
       result: buildPublicAgentResult("ocr", {
         source_type: "messenger",
-        utterances: [{ speaker: "A", text: "masked" }]
+        utterances: [{ speaker: "A", text: "masked" }],
+        review: {
+          status: "review",
+          confidence_score: 0.41,
+          requires_human_review: true,
+          reasons: ["메신저 캡처치고 발화 수가 적어 일부 줄이 누락됐을 수 있습니다."],
+          recommended_action: "원문 이미지와 추출 텍스트를 함께 보고 확인해 주세요."
+        }
       })
     });
 
