@@ -3,6 +3,8 @@ import {
   buildJudgmentCore,
   buildJudgmentProfileConsiderations
 } from "../analysis/judgment-core.mjs";
+import { buildClaimSupport } from "../analysis/claim-support.mjs";
+import { applyPreOutputSafetyGate } from "../analysis/safety-gate.mjs";
 import type {
   CandidateIssue,
   EvidenceCitation,
@@ -311,8 +313,12 @@ export function buildLegalAnalysisPayload(
     precedent_cards,
     input.summary
   );
-
-  return {
+  const claim_support = buildClaimSupport({
+    summary: input.summary,
+    charges,
+    citationMap: citation_map
+  });
+  const legalAnalysis = {
     can_sue: judgment.can_sue,
     risk_level: judgment.risk_level,
     summary: input.summary,
@@ -326,13 +332,21 @@ export function buildLegalAnalysisPayload(
     precedent_cards,
     disclaimer: input.disclaimer,
     citation_map,
+    claim_support,
     reference_library: input.allReferences,
     law_reference_library: input.matchedLaws.map((item) => item.reference),
     precedent_reference_library: input.matchedPrecedents.map((item) => item.reference),
     ...(input.request.profileContext ? { profile_context: input.request.profileContext } : {}),
     ...(input.profileConsiderations.length > 0 ? { profile_considerations: input.profileConsiderations } : {}),
-    ...(input.verifier ? { verifier: input.verifier } : {})
+    ...(input.verifier ? { verifier: { ...input.verifier, claim_support } } : {})
   };
+
+  const { legalAnalysis: gatedAnalysis } = applyPreOutputSafetyGate(legalAnalysis, {
+    verifier: legalAnalysis.verifier,
+    scopeAssessment: input.scopeAssessment
+  });
+
+  return gatedAnalysis;
 }
 
 export function buildReferencePayload(input: ReferencePayloadInput): Pick<

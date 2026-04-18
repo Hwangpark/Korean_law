@@ -233,6 +233,18 @@ async function main(): Promise<void> {
     throw new Error("expected legal_analysis grounding evidence.");
   }
 
+  if (result.legal_analysis.claim_support?.overall !== result.legal_analysis.verifier?.claim_support?.overall) {
+    throw new Error("expected legal_analysis claim_support to stay aligned with verifier claim_support.");
+  }
+
+  if (result.legal_analysis.safety_gate?.stage !== "pre_output_safety_gate") {
+    throw new Error("expected keyword legal_analysis to expose pre_output_safety_gate metadata.");
+  }
+
+  if (result.legal_analysis.safety_gate?.status !== "passed" && result.legal_analysis.can_sue !== false) {
+    throw new Error("expected adjusted keyword safety gate outputs to downgrade can_sue.");
+  }
+
   if (typeof result.legal_analysis.can_sue !== "boolean" || typeof result.legal_analysis.risk_level !== "number") {
     throw new Error("expected legal_analysis judgment outputs.");
   }

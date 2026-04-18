@@ -253,6 +253,42 @@ function sanitizeClaimSupport(value: unknown): Record<string, unknown> {
   };
 }
 
+function sanitizeVerifier(value: unknown): Record<string, unknown> {
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+
+  return {
+    stage: sanitizeString(record.stage),
+    status: sanitizeString(record.status),
+    evidence_sufficient: sanitizeBoolean(record.evidence_sufficient),
+    citation_integrity: sanitizeBoolean(record.citation_integrity),
+    contradiction_detected: sanitizeBoolean(record.contradiction_detected),
+    selected_reference_count: sanitizeNumber(record.selected_reference_count),
+    issue_count: sanitizeNumber(record.issue_count),
+    confidence_calibration: {
+      score: sanitizeNumber((record.confidence_calibration as Record<string, unknown> | undefined)?.score),
+      label: sanitizeString((record.confidence_calibration as Record<string, unknown> | undefined)?.label)
+    },
+    claim_support: sanitizeClaimSupport(record.claim_support),
+    warnings: sanitizeStringArray(record.warnings)
+  };
+}
+
+function sanitizeSafetyGate(value: unknown): Record<string, unknown> {
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+
+  return {
+    stage: sanitizeString(record.stage),
+    status: sanitizeString(record.status),
+    adjusted_output: sanitizeBoolean(record.adjusted_output),
+    blocked_reasons: sanitizeStringArray(record.blocked_reasons),
+    warnings: sanitizeStringArray(record.warnings)
+  };
+}
+
 function sanitizeQueryRefs(value: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) {
     return [];
@@ -421,6 +457,8 @@ function sanitizePublicLegalAnalysis(
     },
     grounding_evidence: sanitizeGroundingEvidenceSummary(legalAnalysis?.grounding_evidence),
     claim_support: sanitizeClaimSupport(legalAnalysis?.claim_support),
+    verifier: sanitizeVerifier(legalAnalysis?.verifier),
+    safety_gate: sanitizeSafetyGate(legalAnalysis?.safety_gate),
     selected_reference_ids: sanitizeStringArray(legalAnalysis?.selected_reference_ids),
     charges: sanitizePublicCharges(legalAnalysis?.charges),
     recommended_actions: sanitizeStringArray(legalAnalysis?.recommended_actions),

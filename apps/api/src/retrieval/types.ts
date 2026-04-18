@@ -430,6 +430,13 @@ export interface KeywordVerificationResponse {
     recommended_actions: string[];
     evidence_to_collect: string[];
     claim_support?: ClaimSupportSummary;
+    safety_gate?: {
+      stage: string;
+      status: string;
+      adjusted_output: boolean;
+      blocked_reasons: string[];
+      warnings: string[];
+    };
     precedent_cards: Array<{
       case_no: string;
       court: string;
