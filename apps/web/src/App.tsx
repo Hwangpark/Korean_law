@@ -37,6 +37,13 @@ import {
   getRuntimeTrustHeadline,
   type ProviderSource,
 } from './lib/trust-status';
+import {
+  buildContinuityDraft,
+  canRestoreContinuityText,
+  formatContinuityDraftTitle,
+  sanitizeContinuityDraftForStorage,
+  type ContinuityDraft,
+} from './lib/continuity';
 import { DetailPanel } from './components/DetailPanel';
 import { RuntimeDashboard } from './components/RuntimeDashboard';
 import type {
@@ -205,14 +212,6 @@ type PendingKeyword = {
 };
 
 type ComposerMode = 'text' | 'image';
-
-type ContinuityDraft = {
-  composerMode: ComposerMode;
-  contextType: ContextType;
-  text: string;
-  imageName?: string | null;
-  updatedAt: string;
-};
 
 type LastViewedResult = {
   caseId?: string | null;
@@ -1586,15 +1585,15 @@ export default function App() {
       return;
     }
 
-    const nextDraft: ContinuityDraft = {
+    const nextDraft = buildContinuityDraft({
       composerMode,
       contextType,
       text,
       imageName: selectedImageFile?.name ?? null,
       updatedAt: new Date().toISOString(),
-    };
+    });
     setContinuityDraft(nextDraft);
-    saveJsonStorage(DRAFT_STORAGE_KEY, nextDraft);
+    saveJsonStorage(DRAFT_STORAGE_KEY, sanitizeContinuityDraftForStorage(nextDraft));
   }, [composerMode, contextType, text, selectedImageFile]);
 
   useEffect(() => {
@@ -2321,7 +2320,7 @@ export default function App() {
 
     setContextType(continuityDraft.contextType);
     setComposerMode(continuityDraft.composerMode);
-    setText(continuityDraft.composerMode === 'text' ? continuityDraft.text : '');
+    setText(canRestoreContinuityText(continuityDraft) ? continuityDraft.text : '');
     if (continuityDraft.composerMode === 'image') {
       clearImageSelection();
     }
@@ -2425,7 +2424,7 @@ export default function App() {
           {continuityDraft && (
             <button type="button" className="continuity-card" onClick={handleResumeDraft}>
               <span className="continuity-kicker">이어서 작성</span>
-              <strong>{continuityDraft.composerMode === 'image' ? continuityDraft.imageName ?? '이미지 업로드 초안' : `${continuityDraft.text.slice(0, 72)}${continuityDraft.text.length > 72 ? '…' : ''}`}</strong>
+              <strong>{formatContinuityDraftTitle(continuityDraft)}</strong>
               <span>{formatContextType(continuityDraft.contextType)} · {formatKoreanDateTime(continuityDraft.updatedAt)}</span>
             </button>
           )}
