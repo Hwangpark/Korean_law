@@ -327,6 +327,15 @@ async function verifyReplayAndCompleteShape(): Promise<void> {
       "agent_done event should not leak internal retrieval evidence payloads"
     );
 
+    const progressEventKeys = events
+      .filter((event) => event.event === "agent_start" || event.event === "agent_done")
+      .map((event) => `${event.event}:${String(event.data.agent ?? "")}`);
+    assert.equal(
+      new Set(progressEventKeys).size,
+      progressEventKeys.length,
+      `replay stream should not duplicate stage events: ${progressEventKeys.join(", ")}`
+    );
+
     const classifierDoneEvent = events.find(
       (event) => event.event === "agent_done" && event.data.agent === "classifier"
     );

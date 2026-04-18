@@ -14,21 +14,17 @@ function emitTimelineEvent(timeline, event, onEvent) {
   }
 }
 
-function annotateLastAgentDone(timeline, agent, summary, onEvent) {
+function annotateLastAgentDone(timeline, agent, summary) {
   for (let index = timeline.length - 1; index >= 0; index -= 1) {
     const entry = timeline[index];
     if (entry?.type === "agent_done" && entry?.agent === agent) {
-      const nextEntry = {
+      timeline[index] = {
         ...entry,
         summary: {
           ...(entry.summary ?? {}),
           ...summary
         }
       };
-      timeline[index] = nextEntry;
-      if (typeof onEvent === "function") {
-        onEvent(nextEntry);
-      }
       return;
     }
   }
@@ -71,7 +67,7 @@ export async function runAnalysis(request, options = {}) {
     scope_flags: classification.scope_flags,
     supported_issues: classification.supported_issues,
     unsupported_issues: classification.unsupported_issues
-  }, onEvent);
+  });
   const retrievalTools = createRetrievalTools({ providerMode });
   const retrievalPlan = retrievalTools.buildAnalysisPlan(request, ocr, classification, userContext ?? undefined);
 
@@ -98,13 +94,13 @@ export async function runAnalysis(request, options = {}) {
     scope_flags: retrievalPlan.scopeFlags,
     supported_issues: retrievalPlan.supportedIssues,
     unsupported_issues: retrievalPlan.unsupportedIssues
-  }, onEvent);
+  });
   annotateLastAgentDone(timeline, "precedent", {
     logical_substeps: ["retrieval_planner", "precedent_retrieval"],
     scope_flags: retrievalPlan.scopeFlags,
     supported_issues: retrievalPlan.supportedIssues,
     unsupported_issues: retrievalPlan.unsupportedIssues
-  }, onEvent);
+  });
   const retrievalMeta = retrievalTools.buildCombinedRetrievalMeta({
     law_search: lawSearch,
     precedent_search: precedentSearch
@@ -161,7 +157,7 @@ export async function runAnalysis(request, options = {}) {
     selected_reference_ids: retrievalEvidencePack.selected_reference_ids,
     verifier,
     safety_gate: safetyGate
-  }, onEvent);
+  });
 
   return {
     meta: {
