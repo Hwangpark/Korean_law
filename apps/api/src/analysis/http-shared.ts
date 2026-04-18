@@ -123,6 +123,7 @@ export function isAnalysisHttpPath(pathname: string): boolean {
     pathname === "/api/analyze" ||
     pathname.startsWith("/api/analyze/") ||
     pathname === "/api/history" ||
+    pathname.startsWith("/api/history/") ||
     pathname === "/api/references/search" ||
     pathname.startsWith("/api/references/")
   );

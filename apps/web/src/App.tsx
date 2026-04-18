@@ -10,6 +10,7 @@ import {
   evaluatePasswordPolicy,
   fetchAnalysisResult,
   fetchHistory,
+  fetchHistoryDetail,
   fetchMe,
   getInitialAuthBaseUrl,
   getInitialGuestSession,
@@ -49,6 +50,9 @@ const RUNTIME_BADGE = RUNTIME_IS_LIVE ? 'LIVE' : 'MOCK';
 const RUNTIME_NOTICE = RUNTIME_IS_LIVE
   ? 'LIVE 설정입니다. 실제 provider가 주입되지 않으면 서버가 fixture fallback을 사용할 수 있습니다.'
   : '현재 로컬 검색은 law.go.kr 실시간 조회가 아니라 mock fixture 기반입니다. 그래서 응답이 매우 빠르게 끝납니다.';
+
+const DRAFT_STORAGE_KEY = 'korean-law.continuity.draft';
+const LAST_RESULT_STORAGE_KEY = 'korean-law.continuity.last-result';
 
 type ContextType = 'community' | 'game_chat' | 'messenger' | 'other';
 type View = 'input' | 'analyzing' | 'results' | 'signup' | 'login';
@@ -140,6 +144,25 @@ type PendingKeyword = {
 };
 
 type ComposerMode = 'text' | 'image';
+
+type ContinuityDraft = {
+  composerMode: ComposerMode;
+  contextType: ContextType;
+  text: string;
+  imageName?: string | null;
+  updatedAt: string;
+};
+
+type LastViewedResult = {
+  caseId?: string | null;
+  title: string;
+  summary: string;
+  riskLevel: number;
+  canSue: boolean;
+  contextType: string;
+  inputMode: 'text' | 'image';
+  createdAt: string;
+};
 
 type AnalysisStreamEvent = {
   type?: string;
@@ -1036,6 +1059,31 @@ function unwrapCompletedAnalysis(value: unknown): unknown {
   return current;
 }
 
+function loadJsonStorage<T>(key: string): T | null {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveJsonStorage(key: string, value: unknown) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function clearJsonStorage(key: string) {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 function fileToBase64(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -1175,6 +1223,10 @@ export default function App() {
   const [selectedKeywordDetail, setSelectedKeywordDetail] = useState<DetailPanelData | null>(null);
   const [analysisHistory, setAnalysisHistory] = useState<AnalysisHistoryItem[]>([]);
   const [historyBusy, setHistoryBusy] = useState(false);
+  const [historyOpeningCaseId, setHistoryOpeningCaseId] = useState<string | null>(null);
+  const [activeHistoryCaseId, setActiveHistoryCaseId] = useState<string | null>(null);
+  const [continuityDraft, setContinuityDraft] = useState<ContinuityDraft | null>(() => loadJsonStorage<ContinuityDraft>(DRAFT_STORAGE_KEY));
+  const [lastViewedResult, setLastViewedResult] = useState<LastViewedResult | null>(() => loadJsonStorage<LastViewedResult>(LAST_RESULT_STORAGE_KEY));
   const [runtimeTimeline, setRuntimeTimeline] = useState<RuntimeTimelineItem[]>(
     AGENT_STEPS.map((step) => ({
       agentId: step.id,
@@ -1300,6 +1352,44 @@ export default function App() {
   }, [result]);
 
   useEffect(() => {
+    const hasDraft = composerMode === 'image' ? Boolean(selectedImageFile) : text.trim().length > 0;
+    if (!hasDraft) {
+      setContinuityDraft(null);
+      clearJsonStorage(DRAFT_STORAGE_KEY);
+      return;
+    }
+
+    const nextDraft: ContinuityDraft = {
+      composerMode,
+      contextType,
+      text,
+      imageName: selectedImageFile?.name ?? null,
+      updatedAt: new Date().toISOString(),
+    };
+    setContinuityDraft(nextDraft);
+    saveJsonStorage(DRAFT_STORAGE_KEY, nextDraft);
+  }, [composerMode, contextType, text, selectedImageFile]);
+
+  useEffect(() => {
+    if (!result) {
+      return;
+    }
+
+    const nextLastViewed: LastViewedResult = {
+      caseId: activeHistoryCaseId,
+      title: analysisHistory.find((item) => item.caseId === activeHistoryCaseId)?.title ?? result.summary,
+      summary: result.summary,
+      riskLevel: result.risk_level,
+      canSue: result.can_sue,
+      contextType: currentRun?.contextType ?? 'other',
+      inputMode: currentRun?.inputMode ?? 'text',
+      createdAt: currentRun?.submittedAt ?? new Date().toISOString(),
+    };
+    setLastViewedResult(nextLastViewed);
+    saveJsonStorage(LAST_RESULT_STORAGE_KEY, nextLastViewed);
+  }, [result, activeHistoryCaseId, analysisHistory, currentRun]);
+
+  useEffect(() => {
     setSelectedKeywordDetail(null);
   }, [keywordResult]);
 
@@ -1391,6 +1481,11 @@ export default function App() {
     }
     setResult(mergeProfileResult(analysis, responseRecord));
     setPendingAnalysis(null);
+    setActiveHistoryCaseId(
+      typeof responseRecord.case_id === 'string' ? responseRecord.case_id : null,
+    );
+    clearJsonStorage(DRAFT_STORAGE_KEY);
+    setContinuityDraft(null);
     setView('results');
     setAnalysisHistory((prev) => prev);
     if (token) {
@@ -1775,6 +1870,7 @@ export default function App() {
     setActiveAgentId(null);
     setActiveJobId(null);
     setCurrentRun(null);
+    setActiveHistoryCaseId(null);
     resetRuntimeTimeline();
     setAnalysisError(null);
     setSelectedDetail(null);
@@ -1908,6 +2004,118 @@ export default function App() {
     }
   }
 
+
+  async function handleOpenHistoryItem(item: AnalysisHistoryItem) {
+    if (!session?.token) {
+      openLoginPage('이전 분석을 다시 보려면 로그인 상태가 필요합니다.');
+      return;
+    }
+
+    setHistoryOpeningCaseId(item.caseId);
+    setAnalysisError(null);
+    setKeywordError(null);
+    setKeywordResult(null);
+    setSelectedKeywordDetail(null);
+    setSelectedDetail(null);
+    closeAnalysisStream();
+
+    try {
+      const response = await fetchHistoryDetail(ANALYSIS_BASE_URL, session.token, item.caseId);
+      const analysis = normalizeCompletedAnalysisResponse(response);
+      if (!analysis) {
+        throw new Error('저장된 분석 결과를 다시 불러오지 못했습니다.');
+      }
+
+      setResult(mergeProfileResult(analysis, response as Record<string, unknown>));
+      setCurrentRun({
+        inputMode: item.inputMode === 'image' ? 'image' : 'text',
+        contextType: item.contextType,
+        submittedAt: item.createdAt,
+        textLength: 0,
+        imageName: item.inputMode === 'image' ? item.title : undefined,
+        ocrReview: extractOcrReviewFromPayload(response as Record<string, unknown>),
+      });
+      setRuntimeTimeline(
+        AGENT_STEPS.map((step) => {
+          const matched = Array.isArray(response.timeline)
+            ? response.timeline.find((entry) => isRecord(entry) && entry.agent === step.id && entry.type === 'agent_done')
+            : null;
+          return {
+            agentId: step.id,
+            label: step.label,
+            description: step.desc,
+            status: matched ? 'done' : 'pending',
+            finishedAt: isRecord(matched) ? firstText(matched.at) || undefined : undefined,
+            durationMs: isRecord(matched) && typeof matched.duration_ms === 'number' ? matched.duration_ms : undefined,
+          } as RuntimeTimelineItem;
+        }),
+      );
+      setActiveAgentId(null);
+      setActiveJobId(null);
+      setActiveHistoryCaseId(item.caseId);
+      setView('results');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '이전 분석을 여는 중 오류가 발생했습니다.';
+      if (/unauthorized|401/i.test(message)) {
+        clearStoredToken();
+        setSession(null);
+        openLoginPage('세션이 만료되었습니다. 다시 로그인하면 최근 분석을 이어서 볼 수 있습니다.');
+      } else {
+        setAnalysisError(message);
+      }
+    } finally {
+      setHistoryOpeningCaseId(null);
+    }
+  }
+
+  function handleResumeDraft() {
+    if (!continuityDraft) {
+      return;
+    }
+
+    setContextType(continuityDraft.contextType);
+    setComposerMode(continuityDraft.composerMode);
+    setText(continuityDraft.composerMode === 'text' ? continuityDraft.text : '');
+    if (continuityDraft.composerMode === 'image') {
+      clearImageSelection();
+    }
+    setView('input');
+  }
+
+  function handleReopenLastViewed() {
+    if (!lastViewedResult) {
+      return;
+    }
+
+    const matched = lastViewedResult.caseId
+      ? analysisHistory.find((item) => item.caseId === lastViewedResult.caseId)
+      : null;
+
+    if (matched) {
+      void handleOpenHistoryItem(matched);
+      return;
+    }
+
+    if (lastViewedResult.caseId && session?.token) {
+      void handleOpenHistoryItem({
+        caseId: lastViewedResult.caseId,
+        inputMode: lastViewedResult.inputMode,
+        contextType: lastViewedResult.contextType,
+        title: lastViewedResult.title,
+        sourceUrl: null,
+        createdAt: lastViewedResult.createdAt,
+        summary: lastViewedResult.summary,
+        riskLevel: lastViewedResult.riskLevel,
+        canSue: lastViewedResult.canSue,
+      });
+      return;
+    }
+
+    if (lastViewedResult.caseId && !session?.token) {
+      openLoginPage('최근 결과를 다시 보려면 로그인 상태가 필요합니다.');
+    }
+  }
+
   const headerActions = (
     <div className="auth-controls">
       {!session ? (
@@ -1965,6 +2173,25 @@ export default function App() {
           ))}
         </div>
       </section>
+
+      {(continuityDraft || lastViewedResult) && (
+        <section className="continuity-strip">
+          {continuityDraft && (
+            <button type="button" className="continuity-card" onClick={handleResumeDraft}>
+              <span className="continuity-kicker">이어서 작성</span>
+              <strong>{continuityDraft.composerMode === 'image' ? continuityDraft.imageName ?? '이미지 업로드 초안' : `${continuityDraft.text.slice(0, 72)}${continuityDraft.text.length > 72 ? '…' : ''}`}</strong>
+              <span>{formatContextType(continuityDraft.contextType)} · {formatKoreanDateTime(continuityDraft.updatedAt)}</span>
+            </button>
+          )}
+          {lastViewedResult && (
+            <button type="button" className="continuity-card" onClick={handleReopenLastViewed}>
+              <span className="continuity-kicker">최근 결과 다시 보기</span>
+              <strong>{lastViewedResult.summary}</strong>
+              <span>{formatContextType(lastViewedResult.contextType)} · 위험도 Lv.{lastViewedResult.riskLevel}</span>
+            </button>
+          )}
+        </section>
+      )}
 
       <div className="input-card">
         <div className="section-label">대화 출처</div>
@@ -2126,6 +2353,9 @@ export default function App() {
         runtimeTimeline={runtimeTimeline}
         analysisHistory={analysisHistory}
         historyBusy={historyBusy}
+        historyActiveCaseId={activeHistoryCaseId}
+        onOpenHistory={handleOpenHistoryItem}
+        historyOpeningCaseId={historyOpeningCaseId}
         formatContextType={formatContextType}
         formatInputMode={formatInputMode}
         formatKoreanDateTime={formatKoreanDateTime}
@@ -2282,6 +2512,9 @@ export default function App() {
         runtimeTimeline={runtimeTimeline}
         analysisHistory={analysisHistory}
         historyBusy={historyBusy}
+        historyActiveCaseId={activeHistoryCaseId}
+        onOpenHistory={handleOpenHistoryItem}
+        historyOpeningCaseId={historyOpeningCaseId}
         formatContextType={formatContextType}
         formatInputMode={formatInputMode}
         formatKoreanDateTime={formatKoreanDateTime}
@@ -2706,7 +2939,7 @@ export default function App() {
               </div>
               <div className="history-list">
                 {analysisHistory.length > 0 ? analysisHistory.slice(0, 6).map((item) => (
-                  <div key={`${item.caseId}-${item.createdAt}`} className="history-card">
+                  <div key={`${item.caseId}-${item.createdAt}`} className={`history-card ${activeHistoryCaseId === item.caseId ? 'history-card-active' : ''}`}>
                     <div className="history-card-top">
                       <strong>{item.title}</strong>
                       <span>{formatKoreanDateTime(item.createdAt)}</span>
@@ -2716,6 +2949,11 @@ export default function App() {
                       <span className="provenance-chip">{formatContextType(item.contextType as ContextType)}</span>
                       <span className="provenance-chip">위험도 Lv.{item.riskLevel}</span>
                       <span className="provenance-chip">{item.canSue ? '고소 가능' : '고소 어려움'}</span>
+                    </div>
+                    <div className="history-card-actions">
+                      <button className="card-detail-btn" type="button" onClick={() => void handleOpenHistoryItem(item)} disabled={historyOpeningCaseId === item.caseId}>
+                        {historyOpeningCaseId === item.caseId ? '불러오는 중...' : activeHistoryCaseId === item.caseId ? '열람 중' : '다시 열기'}
+                      </button>
                     </div>
                   </div>
                 )) : <div className="detail-empty">저장된 분석 기록이 아직 없습니다.</div>}

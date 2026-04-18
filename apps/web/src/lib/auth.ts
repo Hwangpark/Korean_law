@@ -64,6 +64,18 @@ export type AnalysisHistoryItem = {
   canSue: boolean;
 };
 
+export type AnalysisHistoryDetailResponse = AnalyzeCaseResponse & {
+  case_id?: string;
+  run_id?: string;
+  title?: string;
+  input_mode?: string;
+  context_type?: string;
+  created_at?: string;
+  source_url?: string | null;
+  timeline?: Array<Record<string, unknown>>;
+  profile_context?: Record<string, unknown>;
+};
+
 export type AnalysisReferenceItem = {
   id?: string;
   kind?: 'law' | 'precedent' | string;
@@ -86,6 +98,30 @@ export type AnalysisReferenceItem = {
   verdict?: string;
   label?: string;
   category?: string;
+  confidence_score?: number;
+  confidenceScore?: number;
+  match_reason?: string;
+  matchReason?: string;
+  matchedQueries?: string[];
+  matched_queries?: string[];
+  matchedQueryRefs?: Array<Record<string, unknown>>;
+  matched_query_refs?: Array<Record<string, unknown>>;
+  matchedIssueTypes?: string[];
+  matched_issue_types?: string[];
+  referenceKey?: string;
+  reference_key?: string;
+  citationId?: string;
+  citation_id?: string;
+  referenceId?: string;
+  reference_id?: string;
+  lawReferenceId?: string;
+  law_reference_id?: string;
+  precedentReferenceIds?: string[];
+  precedent_reference_ids?: string[];
+  snippet?: {
+    field?: string;
+    text?: string;
+  };
   sourceMode?: string;
   similarityScore?: number;
   tags?: string[];
@@ -126,6 +162,8 @@ export type AnalysisLegalResult = {
   reference_library?: AnalysisReferenceItem[];
   law_reference_library?: AnalysisReferenceItem[];
   precedent_reference_library?: AnalysisReferenceItem[];
+  matched_laws?: AnalysisReferenceItem[];
+  matched_precedents?: AnalysisReferenceItem[];
   user_profile?: AuthProfile | null;
   profile_context?: AuthProfile | null;
   profile_guidance?:
@@ -614,4 +652,16 @@ export async function fetchHistory(baseUrl: string, token: string) {
   );
 
   return Array.isArray(response.items) ? response.items : [];
+}
+
+export async function fetchHistoryDetail(baseUrl: string, token: string, caseId: string) {
+  return requestJson<AnalysisHistoryDetailResponse>(
+    `${normalizeBaseUrl(baseUrl)}/api/history/${encodeURIComponent(caseId)}`,
+    {
+      method: 'GET',
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    },
+  );
 }

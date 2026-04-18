@@ -7,6 +7,9 @@ type RuntimeDashboardProps = {
   runtimeTimeline: RuntimeTimelineItem[];
   analysisHistory: AnalysisHistoryItem[];
   historyBusy: boolean;
+  historyActiveCaseId?: string | null;
+  onOpenHistory?: (item: AnalysisHistoryItem) => void;
+  historyOpeningCaseId?: string | null;
   formatContextType: (value: string) => string;
   formatInputMode: (value: 'text' | 'image') => string;
   formatKoreanDateTime: (value: string) => string;
@@ -19,6 +22,9 @@ export function RuntimeDashboard({
   runtimeTimeline,
   analysisHistory,
   historyBusy,
+  historyActiveCaseId,
+  onOpenHistory,
+  historyOpeningCaseId,
   formatContextType,
   formatInputMode,
   formatKoreanDateTime,
@@ -109,19 +115,29 @@ export function RuntimeDashboard({
           <div className="runtime-empty">히스토리를 불러오는 중입니다...</div>
         ) : analysisHistory.length > 0 ? (
           <div className="runtime-history-list">
-            {analysisHistory.slice(0, 5).map((item) => (
-              <div key={item.caseId} className="runtime-history-item">
-                <div>
-                  <strong>{item.title}</strong>
-                  <p>{item.summary}</p>
+            {analysisHistory.slice(0, 5).map((item) => {
+              const isActive = historyActiveCaseId === item.caseId;
+              const isOpening = historyOpeningCaseId === item.caseId;
+              return (
+                <div key={item.caseId} className={`runtime-history-item${isActive ? ' runtime-history-item-active' : ''}`}>
+                  <div>
+                    <strong>{item.title}</strong>
+                    <p>{item.summary}</p>
+                  </div>
+                  <div className="runtime-history-meta">
+                    <span>{item.canSue ? '고소 검토' : '쟁점 약함'}</span>
+                    <span>Lv.{item.riskLevel}</span>
+                    <span>{formatContextType(item.contextType)}</span>
+                    <span>{formatKoreanDateTime(item.createdAt)}</span>
+                  </div>
+                  {onOpenHistory && (
+                    <button className="runtime-history-open-btn" type="button" onClick={() => onOpenHistory(item)} disabled={isOpening}>
+                      {isOpening ? '불러오는 중...' : isActive ? '열람 중' : '다시 열기'}
+                    </button>
+                  )}
                 </div>
-                <div className="runtime-history-meta">
-                  <span>{item.canSue ? '고소 검토' : '쟁점 약함'}</span>
-                  <span>Lv.{item.riskLevel}</span>
-                  <span>{formatKoreanDateTime(item.createdAt)}</span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="runtime-empty">표시할 히스토리가 없습니다. 로그인 후 분석하면 여기에 쌓입니다.</div>

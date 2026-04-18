@@ -25,6 +25,11 @@ interface HistoryRow {
   result_json: Record<string, unknown>;
 }
 
+interface HistoryDetailRow extends HistoryRow {
+  timeline_json: unknown[];
+  profile_snapshot: Record<string, unknown>;
+}
+
 interface GuestUsageRow {
   usage_count: number;
 }
@@ -72,6 +77,13 @@ export interface AnalysisHistoryItem {
   canSue: boolean;
 }
 
+export interface AnalysisHistoryDetail extends AnalysisHistoryItem {
+  result: Record<string, unknown>;
+  timeline: unknown[];
+  profileContext: Record<string, unknown> | null;
+  referenceLibrary: ReferenceLibraryItem[];
+}
+
 export interface GuestUsageResult {
   guestId: string | null;
   usageCount: number;
@@ -90,6 +102,7 @@ export interface AnalysisStore {
   saveAnalysis(input: SaveAnalysisInput): Promise<{ caseId: string; runId: string; referenceLibrary: ReferenceLibraryItem[] }>;
   saveReferenceLibrary(input: SaveReferenceLibraryInput): Promise<ReferenceLibraryItem[]>;
   listHistory(userId: number, limit?: number): Promise<AnalysisHistoryItem[]>;
+  getHistoryDetail(userId: number, caseId: string): Promise<AnalysisHistoryDetail | null>;
   consumeGuestAnalysis(identity: GuestUsageIdentity, limit?: number): Promise<GuestUsageResult>;
   searchReferences(query: string, limit?: number): Promise<ReferenceLibraryItem[]>;
   getReferenceByKindAndId(kind: "law" | "precedent", id: string): Promise<ReferenceDetailItem | null>;
@@ -478,6 +491,65 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
     });
   }
 
+
+  async function getHistoryDetail(userId: number, caseId: string): Promise<AnalysisHistoryDetail | null> {
+    const result = await db.query<HistoryDetailRow>(
+      `
+        SELECT
+          c.id AS case_id,
+          c.input_mode,
+          c.context_type,
+          c.title,
+          c.source_url,
+          r.created_at,
+          r.result_json,
+          r.timeline_json,
+          r.profile_snapshot
+        FROM analysis_runs r
+        JOIN analysis_cases c ON c.id = r.case_id
+        WHERE r.user_id = $1 AND c.id = $2
+        ORDER BY r.created_at DESC
+        LIMIT 1
+      `,
+      [userId, caseId]
+    );
+
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+
+    const referenceResult = await db.query<ReferenceRow>(
+      `
+        SELECT *
+        FROM reference_library
+        WHERE case_id = $1
+        ORDER BY kind ASC, updated_at DESC, created_at DESC
+      `,
+      [caseId]
+    );
+
+    const legalAnalysis = ((row.result_json ?? {}) as Record<string, unknown>).legal_analysis as
+      | Record<string, unknown>
+      | undefined;
+
+    return {
+      caseId: row.case_id,
+      inputMode: row.input_mode,
+      contextType: row.context_type,
+      title: row.title ?? "사건 파일",
+      sourceUrl: row.source_url,
+      createdAt: row.created_at,
+      summary: typeof legalAnalysis?.summary === "string" ? legalAnalysis.summary : "분석 결과",
+      riskLevel: Number(legalAnalysis?.risk_level ?? 0),
+      canSue: Boolean(legalAnalysis?.can_sue),
+      result: (row.result_json ?? {}) as Record<string, unknown>,
+      timeline: Array.isArray(row.timeline_json) ? row.timeline_json : [],
+      profileContext: row.profile_snapshot ?? null,
+      referenceLibrary: referenceResult.rows.map((referenceRow) => mapReferenceRow(referenceRow))
+    };
+  }
+
   async function consumeGuestAnalysis(identity: GuestUsageIdentity, limit = 10): Promise<GuestUsageResult> {
     const guestId = String(identity.guestId ?? "").trim() || null;
     const normalizedIp = String(identity.ipAddress ?? "").trim();
@@ -595,6 +667,7 @@ export function createAnalysisStore(db: PostgresClient): AnalysisStore {
     saveAnalysis,
     saveReferenceLibrary,
     listHistory,
+    getHistoryDetail,
     consumeGuestAnalysis,
     searchReferences,
     getReferenceByKindAndId
