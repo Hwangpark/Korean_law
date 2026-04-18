@@ -1244,6 +1244,12 @@ async function main() {
     false,
     "public analysis meta must not expose retrieval trace"
   );
+  assert.equal(publicResult.meta.provider_source, "fixture");
+  assert.match(
+    String(publicResult.meta.provider_notice ?? ""),
+    /mock fixture 기준 결과입니다/,
+    "public analysis meta should explain fixture-backed responses clearly"
+  );
   assert.deepEqual(
     publicResult.legal_analysis?.verifier,
     {
