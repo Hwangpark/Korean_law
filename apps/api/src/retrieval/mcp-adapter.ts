@@ -387,6 +387,100 @@ function buildPrecedentEvidenceSeed(
   };
 }
 
+function buildTokenVariants(token: string): string[] {
+  const normalized = normalizeText(token);
+  if (normalized.length < 2) {
+    return [];
+  }
+
+  const variants = new Set([normalized]);
+  for (const suffix of ["으로", "에서", "에게", "한테", "까지", "부터", "이다", "입니다", "했다", "했습니다", "하고", "으로는", "으로도", "은", "는", "이", "가", "을", "를", "에", "의", "도", "만", "과", "와", "로"]) {
+    if (normalized.endsWith(suffix) && normalized.length - suffix.length >= 2) {
+      variants.add(normalized.slice(0, -suffix.length));
+    }
+  }
+
+  return [...variants].filter((value) => value.length >= 2);
+}
+
+function countTokenOverlap(searchable: string, tokens: string[]): number {
+  const normalizedTokens = [...new Set(tokens.flatMap((token) => buildTokenVariants(token)))];
+  return normalizedTokens.filter((token) => searchable.includes(token)).length;
+}
+
+function scoreLawRecord(record: LawDocumentRecord, plan: KeywordQueryPlan): number {
+  const searchable = lawSearchText(record as LawFixtureRecord);
+  const evidence = record.retrieval_evidence;
+  const preciseMatches = evidence?.matched_queries?.filter((query) => query.bucket === "precise").length ?? 0;
+  const broadMatches = evidence?.matched_queries?.filter((query) => query.bucket === "broad").length ?? 0;
+  const matchedIssueTypes = evidence?.matched_issue_types?.length ?? 0;
+  const directMatches = includesAny(searchable, [plan.normalizedQuery, ...plan.tokens]) ? 1 : 0;
+  const querySeedMatches = record.queries.filter((query) =>
+    includesAny(normalizeText(query), [...plan.preciseLawQueries, ...plan.broadLawQueries])
+  ).length;
+  const tokenOverlap = countTokenOverlap(searchable, plan.tokens);
+  const snippetBoost = evidence?.snippet?.text ? 0.12 : 0;
+
+  return (
+    matchedIssueTypes * 5 +
+    preciseMatches * 4 +
+    broadMatches * 1.5 +
+    directMatches * 2 +
+    querySeedMatches * 1.5 +
+    tokenOverlap * 1.6 +
+    (record.penalty ? 0.4 : 0) +
+    snippetBoost
+  );
+}
+
+function scorePrecedentRecord(record: PrecedentDocumentRecord, plan: KeywordQueryPlan): number {
+  const searchable = precedentSearchText(record as PrecedentFixtureRecord);
+  const evidence = record.retrieval_evidence;
+  const preciseMatches = evidence?.matched_queries?.filter((query) => query.bucket === "precise").length ?? 0;
+  const broadMatches = evidence?.matched_queries?.filter((query) => query.bucket === "broad").length ?? 0;
+  const matchedIssueTypes = evidence?.matched_issue_types?.length ?? 0;
+  const directMatches = includesAny(searchable, [plan.normalizedQuery, ...plan.tokens]) ? 1 : 0;
+  const strongMatch = hasStrongPrecedentMatch(record, plan) ? 1 : 0;
+  const tokenOverlap = countTokenOverlap(searchable, plan.tokens);
+  const similarity = typeof record.similarity_score === "number" ? record.similarity_score : 0;
+  const snippetBoost = evidence?.snippet?.text ? 0.12 : 0;
+
+  return (
+    similarity * 6 +
+    matchedIssueTypes * 4 +
+    preciseMatches * 3.5 +
+    broadMatches * 1.2 +
+    directMatches * 2 +
+    strongMatch * 2 +
+    tokenOverlap * 1.3 +
+    snippetBoost
+  );
+}
+
+function rankLawRecords(records: LawDocumentRecord[], plan: KeywordQueryPlan): LawDocumentRecord[] {
+  return [...records].sort((left, right) => {
+    const scoreDiff = scoreLawRecord(right, plan) - scoreLawRecord(left, plan);
+    if (scoreDiff !== 0) {
+      return scoreDiff;
+    }
+
+    const leftKey = `${left.law_name}:${left.article_no}`;
+    const rightKey = `${right.law_name}:${right.article_no}`;
+    return leftKey.localeCompare(rightKey, "ko");
+  });
+}
+
+function rankPrecedentRecords(records: PrecedentDocumentRecord[], plan: KeywordQueryPlan): PrecedentDocumentRecord[] {
+  return [...records].sort((left, right) => {
+    const scoreDiff = scorePrecedentRecord(right, plan) - scorePrecedentRecord(left, plan);
+    if (scoreDiff !== 0) {
+      return scoreDiff;
+    }
+
+    return left.case_no.localeCompare(right.case_no, "ko");
+  });
+}
+
 export function createRetrievalAdapter(input: string | RetrievalAdapterConfig): RetrievalAdapter {
   const config = normalizeAdapterConfig(input);
   const providerInfo = buildProviderInfo(config);
@@ -397,13 +491,13 @@ export function createRetrievalAdapter(input: string | RetrievalAdapterConfig): 
 
     async searchLaws(plan, limit) {
       const lawFixtures = selectLawFixtures(await loadLawFixtures(), plan).slice(0, Math.max(limit * 2, 6));
-      const fixtureResults = uniqueBy(
-        lawFixtures.slice(0, limit).map((record) => sanitizeLawRecord({
+      const fixtureResults = rankLawRecords(uniqueBy(
+        lawFixtures.map((record) => sanitizeLawRecord({
           ...record,
           retrieval_evidence: buildLawEvidenceSeed(record, plan, provider)
         })),
         (record) => `${record.law_name}:${record.article_no}`
-      );
+      ), plan).slice(0, limit);
 
       if (!providerInfo.live_enabled || !config.liveProvider) {
         return fixtureResults;
@@ -414,7 +508,7 @@ export function createRetrievalAdapter(input: string | RetrievalAdapterConfig): 
         limit,
         fixtureSeeds: fixtureResults
       });
-      const normalizedLiveRecords = uniqueBy(
+      const normalizedLiveRecords = rankLawRecords(uniqueBy(
         liveRecords.map((record) => {
           const sanitized = sanitizeLawRecord(record);
           return sanitizeLawRecord({
@@ -423,21 +517,27 @@ export function createRetrievalAdapter(input: string | RetrievalAdapterConfig): 
           });
         }),
         (record) => `${record.law_name}:${record.article_no}`
-      );
+      ), plan);
 
-      return uniqueBy([...normalizedLiveRecords, ...fixtureResults], (record) => `${record.law_name}:${record.article_no}`).slice(0, limit);
+      return rankLawRecords(
+        uniqueBy([...normalizedLiveRecords, ...fixtureResults], (record) => `${record.law_name}:${record.article_no}`),
+        plan
+      ).slice(0, limit);
     },
 
     async searchPrecedents(plan, limit) {
-      const fallbackFixtures = selectPrecedentFixtures(await loadPrecedentFixtures(), plan)
-        .slice(0, Math.max(limit * 2, 6))
-        .map((record, index) =>
-          sanitizePrecedentRecord({
-            ...record,
-            similarity_score: Number(Math.max(0.4, 0.92 - index * 0.12).toFixed(2)),
-            retrieval_evidence: buildPrecedentEvidenceSeed(record, plan, provider)
-          })
-        );
+      const fallbackFixtures = rankPrecedentRecords(
+        selectPrecedentFixtures(await loadPrecedentFixtures(), plan)
+          .slice(0, Math.max(limit * 2, 6))
+          .map((record, index) =>
+            sanitizePrecedentRecord({
+              ...record,
+              similarity_score: Number(Math.max(0.4, 0.92 - index * 0.12).toFixed(2)),
+              retrieval_evidence: buildPrecedentEvidenceSeed(record, plan, provider)
+            })
+          ),
+        plan
+      );
 
       if (!providerInfo.live_enabled || !config.liveProvider) {
         return uniqueBy(fallbackFixtures, (record) => record.case_no).slice(0, limit);
@@ -446,9 +546,9 @@ export function createRetrievalAdapter(input: string | RetrievalAdapterConfig): 
       const liveRecords = await config.liveProvider.searchPrecedents({
         plan,
         limit,
-        fixtureSeeds: fallbackFixtures
+        fixtureSeeds: fallbackFixtures.slice(0, limit)
       });
-      const liveResults = uniqueBy(
+      const liveResults = rankPrecedentRecords(uniqueBy(
         liveRecords.map((record) => {
           const sanitized = sanitizePrecedentRecord(record);
           return sanitizePrecedentRecord({
@@ -457,22 +557,28 @@ export function createRetrievalAdapter(input: string | RetrievalAdapterConfig): 
           });
         }),
         (record) => record.case_no
+      ), plan);
+
+      const strongLiveResults = rankPrecedentRecords(
+        liveResults.filter((record) => hasStrongPrecedentMatch(record, plan)),
+        plan
       );
 
-      const strongLiveResults = liveResults.filter((record) => hasStrongPrecedentMatch(record, plan));
-
       if (buildSpecificTerms(plan).length > 0) {
-        return uniqueBy(
-          [
-            ...strongLiveResults,
-            ...fallbackFixtures,
-            ...liveResults
-          ],
-          (record) => record.case_no
+        return rankPrecedentRecords(
+          uniqueBy(
+            [
+              ...strongLiveResults,
+              ...fallbackFixtures,
+              ...liveResults
+            ],
+            (record) => record.case_no
+          ),
+          plan
         ).slice(0, limit);
       }
 
-      return (liveResults.length > 0 ? liveResults : fallbackFixtures).slice(0, limit);
+      return rankPrecedentRecords(liveResults.length > 0 ? liveResults : fallbackFixtures, plan).slice(0, limit);
     }
   };
 }

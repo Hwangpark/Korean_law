@@ -68,7 +68,47 @@ async function testInjectedLiveProviderIsNormalizedToFixtureShape() {
   assert.ok(precedents[0]?.retrieval_evidence?.snippet?.text);
 }
 
+async function testHybridRankingReordersLiveLawCandidates() {
+  const networkPlan = buildKeywordQueryPlan("정보통신망으로 허위사실을 퍼뜨려 명예를 훼손했습니다", "community");
+  const liveProvider: RetrievalLiveProvider = {
+    async searchLaws() {
+      return [
+        {
+          law_name: "형법",
+          article_no: "제307조",
+          article_title: "명예훼손",
+          content: "공연히 사실 또는 허위사실을 적시하여 사람의 명예를 훼손한 경우를 다룬다.",
+          penalty: "2년 이하 징역 또는 500만원 이하 벌금",
+          url: "https://www.law.go.kr/",
+          topics: ["명예훼손"],
+          queries: ["명예훼손", "허위사실 적시"]
+        },
+        {
+          law_name: "정보통신망법",
+          article_no: "제70조",
+          article_title: "벌칙",
+          content: "정보통신망을 이용하여 사람을 비방할 목적으로 사실 또는 허위사실을 드러내어 명예를 훼손한 경우를 다룬다.",
+          penalty: "3년 이하 징역 또는 3천만원 이하 벌금",
+          url: "https://www.law.go.kr/",
+          topics: ["명예훼손"],
+          queries: ["명예훼손", "허위사실 적시", "정보통신망"]
+        }
+      ];
+    },
+    async searchPrecedents({ fixtureSeeds }) {
+      return fixtureSeeds;
+    }
+  };
+
+  const adapter = createRetrievalAdapter({ providerMode: "live", liveProvider });
+  const laws = await adapter.searchLaws(networkPlan, 2);
+
+  assert.equal(laws[0]?.law_name, "정보통신망법");
+  assert.equal(laws[0]?.article_no, "제70조");
+}
+
 await testLiveModeWithoutInjectedProviderUsesFixtures();
 await testInjectedLiveProviderIsNormalizedToFixtureShape();
+await testHybridRankingReordersLiveLawCandidates();
 
 console.log("retrieval provider boundary tests passed");
