@@ -403,6 +403,12 @@ export interface KeywordVerificationResponse {
       fact_risk_boost?: number;
     };
     selected_reference_ids?: string[];
+    fact_sheet?: {
+      key_points: string[];
+      missing_points: string[];
+      unsupported_points: string[];
+      recommended_focus: string[];
+    };
     charges: Array<{
       charge: string;
       basis: string;

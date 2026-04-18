@@ -31,6 +31,8 @@ async function main() {
   assert.ok(Array.isArray(textResult.legal_analysis.selected_reference_ids), "legal analysis should expose selected reference ids");
   assert.ok(textResult.legal_analysis.decision_axis, "legal analysis should expose aligned decision axis");
   assert.ok(textResult.legal_analysis.charges.every((charge) => Array.isArray(charge.fact_hints)), "charges should expose fact hints");
+  assert.ok(Array.isArray(textResult.legal_analysis.fact_sheet?.key_points), "legal analysis should expose fact sheet key points");
+  assert.ok(Array.isArray(textResult.legal_analysis.fact_sheet?.missing_points), "legal analysis should expose fact sheet missing points");
   assert.ok(textResult.meta?.retrieval_preview?.law, "analysis meta should include law retrieval preview");
   assert.ok(textResult.meta?.retrieval_preview?.precedent, "analysis meta should include precedent retrieval preview");
   assert.ok(Array.isArray(textResult.meta?.retrieval_trace), "analysis meta should include retrieval trace");

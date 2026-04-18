@@ -1683,6 +1683,14 @@ async function main() {
   );
   assert.ok(Array.isArray(factsFirstAnalysis.charges[0]?.fact_hints), "facts-first analysis should carry fact-hint metadata into charges");
   assert.ok(
+    factsFirstAnalysis.fact_sheet?.key_points.some((item) => String(item).includes("금전")),
+    "facts-first analysis should surface confirmed fact signals in a fact sheet"
+  );
+  assert.ok(
+    factsFirstAnalysis.fact_sheet?.recommended_focus.some((item) => String(item).includes("해악 고지")),
+    "facts-first analysis should surface issue-specific fact focus guidance"
+  );
+  assert.ok(
     factsFirstAnalysis.evidence_to_collect.length > 3,
     "facts-first analysis should expand evidence collection guidance from facts and legal elements"
   );
@@ -1939,6 +1947,10 @@ async function main() {
     publicLegalAnalysis.precedent_cards[0]?.grounding?.citation_id,
     "precedent-1",
     "public analysis should retain safe precedent citation ids"
+  );
+  assert.ok(
+    Array.isArray((publicCitationLinkedAnalysis.legal_analysis as { fact_sheet?: { key_points?: string[] } })?.fact_sheet?.key_points),
+    "public analysis should expose sanitized fact-sheet surfacing"
   );
 
   const manager = createAnalysisJobManager();

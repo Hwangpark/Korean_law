@@ -440,6 +440,16 @@ function sanitizeScopeAssessment(value: unknown): Record<string, unknown> {
   };
 }
 
+function sanitizeFactSheet(value: unknown): Record<string, unknown> {
+  const record = asRecord(value);
+  return {
+    key_points: sanitizeStringArray(record.key_points),
+    missing_points: sanitizeStringArray(record.missing_points),
+    unsupported_points: sanitizeStringArray(record.unsupported_points),
+    recommended_focus: sanitizeStringArray(record.recommended_focus)
+  };
+}
+
 function sanitizeGroundingEvidenceSummary(value: unknown): Record<string, unknown> {
   const record = asRecord(value);
   return {
@@ -501,6 +511,7 @@ function sanitizePublicLegalAnalysis(value: unknown): Record<string, unknown> {
     risk_level: asNumber(record.risk_level, 0),
     summary: asString(record.summary, "분석 결과"),
     summary_grounding: sanitizeSharedGrounding(record.summary_grounding),
+    fact_sheet: sanitizeFactSheet(record.fact_sheet),
     disclaimer: asString(record.disclaimer),
     charges: sanitizeChargeList(record.charges),
     recommended_actions: sanitizeStringArray(record.recommended_actions),
@@ -527,6 +538,7 @@ function sanitizeStoredLegalAnalysis(value: unknown): Record<string, unknown> {
     can_sue: publicShape.can_sue,
     risk_level: publicShape.risk_level,
     summary: publicShape.summary,
+    fact_sheet: publicShape.fact_sheet,
     disclaimer: publicShape.disclaimer,
     charges: publicShape.charges,
     recommended_actions: publicShape.recommended_actions,

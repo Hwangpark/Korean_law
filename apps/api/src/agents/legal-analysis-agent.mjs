@@ -144,6 +144,90 @@ function getFallbackElements(issueType) {
   }
 }
 
+function buildFactSheetLabelMap(facts) {
+  return [
+    [facts.public_exposure, "제3자가 볼 수 있는 공개 범위가 확인됩니다."],
+    [facts.direct_message, "당사자 간 직접 메시지 정황이 있습니다."],
+    [facts.repeated_contact, "반복 연락 또는 접근 정황이 보입니다."],
+    [facts.threat_signal, "위해를 암시하는 표현 정황이 있습니다."],
+    [facts.money_request, "금전 또는 재산 요구 정황이 있습니다."],
+    [facts.personal_info_exposed, "개인정보 노출 정황이 있습니다."],
+    [facts.insulting_expression, "경멸적 표현 정황이 있습니다."],
+    [facts.false_fact_signal, "허위사실 또는 사실 적시 의심 정황이 있습니다."],
+    [facts.target_identifiable, "피해자 특정 가능성이 보입니다."]
+  ];
+}
+
+function buildMissingFactPrompts(issueType, facts) {
+  switch (issueType) {
+    case "명예훼손":
+      return [
+        !facts.public_exposure && "제3자가 실제로 볼 수 있었는지, 단체방·커뮤니티 범위를 확인해 주세요.",
+        !facts.target_identifiable && "실명, 닉네임, 프로필 등으로 피해자를 특정할 수 있었는지 적어 주세요.",
+        !facts.false_fact_signal && "문제가 된 내용이 허위사실인지, 의견 표현인지 구분해 주세요."
+      ];
+    case "협박/공갈":
+      return [
+        !facts.threat_signal && "구체적인 해악 고지 표현이 있었는지 원문 그대로 남겨 주세요.",
+        !facts.money_request && "금전이나 이익 요구가 있었는지, 있었다면 액수와 맥락을 적어 주세요.",
+        !facts.repeated_contact && "같은 취지의 위협이 반복됐는지 시점별로 정리해 주세요."
+      ];
+    case "모욕":
+      return [
+        !facts.insulting_expression && "경멸적 표현이 정확히 무엇이었는지 원문 그대로 남겨 주세요.",
+        !facts.public_exposure && "다른 사람이 볼 수 있는 자리였는지 확인해 주세요.",
+        !facts.target_identifiable && "피해자를 특정할 수 있는 단서가 있었는지 적어 주세요."
+      ];
+    case "개인정보 유출":
+      return [
+        !facts.personal_info_exposed && "노출된 개인정보 항목이 무엇인지 구체적으로 적어 주세요.",
+        !facts.public_exposure && "해당 정보가 몇 명에게, 어떤 채널로 공개됐는지 확인해 주세요."
+      ];
+    case "스토킹":
+      return [
+        !facts.repeated_contact && "연락이나 접근이 반복됐는지 날짜 순서대로 정리해 주세요.",
+        !facts.direct_message && !facts.public_exposure && "직접 연락인지, 오프라인 접근인지, 공개 게시인지 유형을 나눠 주세요."
+      ];
+    case "사기":
+      return [
+        !facts.money_request && "금전 지급 또는 송금 요구가 있었는지 확인해 주세요.",
+        "상대방 설명을 믿고 실제로 돈이나 재산상 처분을 했는지 적어 주세요."
+      ];
+    default:
+      return [];
+  }
+}
+
+function buildFactSheet(issueCandidates, facts, scopeAssessment) {
+  const key_points = unique(
+    buildFactSheetLabelMap(facts)
+      .filter(([enabled]) => enabled)
+      .map(([, label]) => label)
+  );
+
+  const missing_points = unique(
+    issueCandidates.flatMap((issue) => buildMissingFactPrompts(issue?.type, facts)).filter(Boolean)
+  );
+
+  const unsupported_points = unique(
+    (scopeAssessment?.unsupported_issues ?? []).map((issue) => `현재 입력에는 지원 범위 밖 이슈(${issue})가 함께 섞여 있을 수 있습니다.`)
+  );
+
+  const recommended_focus = unique([
+    ...(scopeAssessment?.insufficient_facts ? ["사실관계 보완 전에는 확정적 판단보다 추가 확인 질문을 우선하세요."] : []),
+    ...(issueCandidates[0]?.fact_hints?.length
+      ? issueCandidates[0].fact_hints.map((hint) => `${hint} 관련 자료를 우선 확인하세요.`)
+      : [])
+  ]);
+
+  return {
+    key_points,
+    missing_points,
+    unsupported_points,
+    recommended_focus
+  };
+}
+
 function buildSummary(issueCandidates, charges, evidencePack, scopeAssessment, facts) {
   if (scopeAssessment.procedural_heavy) {
     return "현재 입력은 절차법 또는 상고이유 중심 내용이 강해, 실체 쟁점 판단보다 별도 사실관계 정리가 더 중요합니다.";
@@ -618,6 +702,7 @@ export async function runLegalAnalysisAgent(
   const charges = buildCharges(classificationResult, retrievalPlan, evidencePack, scopeAssessment);
   const precedentCards = buildPrecedentCards(evidencePack);
   const summary = buildSummary(issueCandidates, charges, evidencePack, scopeAssessment, facts);
+  const fact_sheet = buildFactSheet(issueCandidates, facts, scopeAssessment);
   const citationMap = buildAnalysisCitationMap(
     options.retrievalEvidencePack?.citation_map,
     summary,
@@ -677,6 +762,7 @@ export async function runLegalAnalysisAgent(
     evidence_to_collect: judgment.evidence_to_collect,
     disclaimer,
     summary,
+    fact_sheet,
     ...(summaryGrounding ? { summary_grounding: summaryGrounding } : {}),
     issue_cards: buildIssueCards(charges),
     precedent_cards: precedentCards,
