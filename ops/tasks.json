@@ -161,7 +161,7 @@
     {
       "id": "web-001",
       "title": "Add lightweight web regression coverage for trust and provider labels",
-      "status": "pending",
+      "status": "completed",
       "owner_role": "frontend-worker",
       "files": [
         "apps/web/package.json",
@@ -174,7 +174,11 @@
         "npm run web:check",
         "npm run build:web"
       ],
-      "notes": "Recent UI fix 23a76d2 closed the passed/warning trust-status gap, but apps/web still has no regression harness. Extract the trust/provider label formatters into a small pure module and cover verifier statuses (passed, warning, needs_caution) plus provider_source labels (fixture, live, live_fallback)."
+      "notes": "Recent UI fix 23a76d2 closed the passed/warning trust-status gap, but apps/web still has no regression harness. Extract the trust/provider label formatters into a small pure module and cover verifier statuses (passed, warning, needs_caution) plus provider_source labels (fixture, live, live_fallback).",
+      "claimed_by": "orchestrator",
+      "claimed_at": "2026-04-18T23:45:28.007Z",
+      "updated_at": "2026-04-18T23:47:26.328Z",
+      "completed_at": "2026-04-18T23:47:26.328Z"
     }
   ]
 }

@@ -30,6 +30,13 @@ import {
   type GuestSession,
   type SignupPayload,
 } from './lib/auth';
+import {
+  formatConfidenceLabel,
+  formatSupportLevel,
+  formatVerifierStatus,
+  getRuntimeTrustHeadline,
+  type ProviderSource,
+} from './lib/trust-status';
 import { DetailPanel } from './components/DetailPanel';
 import { RuntimeDashboard } from './components/RuntimeDashboard';
 import type {
@@ -140,7 +147,7 @@ type VerifierSummary = {
 
 type RuntimeTrustInfo = {
   providerMode: string;
-  providerSource: 'fixture' | 'live' | 'live_fallback';
+  providerSource: ProviderSource;
   notice: string;
 };
 
@@ -989,42 +996,6 @@ function normalizeVerifier(value: unknown): VerifierSummary | null {
   return verifier;
 }
 
-function formatVerifierStatus(status: string) {
-  if (status === 'ready' || status === 'passed') {
-    return '검증 통과';
-  }
-  if (status === 'warning') {
-    return '주의 신호';
-  }
-  if (status === 'needs_caution') {
-    return '주의 필요';
-  }
-  return status || '확인 필요';
-}
-
-function formatConfidenceLabel(label: string) {
-  if (label === 'high') {
-    return '높음';
-  }
-  if (label === 'medium') {
-    return '보통';
-  }
-  if (label === 'low') {
-    return '낮음';
-  }
-  return label || '미상';
-}
-
-function formatSupportLevel(level: ClaimSupportEntry['supportLevel'] | ClaimSupport['overall']) {
-  if (level === 'direct') {
-    return '직접 뒷받침';
-  }
-  if (level === 'partial') {
-    return '부분 뒷받침';
-  }
-  return '근거 부족';
-}
-
 function buildTrustDetail(result: AnalysisResult): DetailPanelData {
   const factHighlights = [
     ...(result.fact_sheet?.keyPoints ?? []),
@@ -1297,18 +1268,6 @@ function normalizeRuntimeTrust(response: unknown): RuntimeTrustInfo {
     providerSource,
     notice,
   };
-}
-
-function getRuntimeTrustHeadline(trust: RuntimeTrustInfo) {
-  if (trust.providerSource === 'live') {
-    return '실제 provider 조회 결과';
-  }
-
-  if (trust.providerSource === 'live_fallback') {
-    return 'fixture fallback 결과';
-  }
-
-  return trust.providerMode === 'live' ? 'fixture 기준 응답' : 'mock fixture 결과';
 }
 
 function unwrapCompletedAnalysis(value: unknown): unknown {
