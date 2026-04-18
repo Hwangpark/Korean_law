@@ -13,6 +13,7 @@ import {
   getNormalizedLegalElements
 } from "../analysis/analysis-normalization.mjs";
 import { buildJudgmentCore } from "../analysis/judgment-core.mjs";
+import { evaluateHighRiskEscalation } from "../analysis/high-risk-policy.mjs";
 import { buildPreAnalysisVerifier } from "../analysis/verifier.mjs";
 
 function unique(values) {
@@ -257,6 +258,65 @@ function buildPrecedentCards(evidencePack) {
     match_reason: precedent.match_reason,
     grounding: buildPrecedentGrounding(precedent)
   }));
+}
+
+function buildClaimSupportEntry({ claim_type, claim_path, title, grounding, citationMap }) {
+  const citations = Array.isArray(citationMap?.citations) ? citationMap.citations : [];
+  const statementHits = citations.filter((citation) => citation?.statement_path === claim_path);
+  const hasStatementCitation = statementHits.length > 0;
+  const precedentCount = Array.isArray(grounding?.precedent_reference_ids)
+    ? grounding.precedent_reference_ids.length
+    : 0;
+  const evidenceCount = Number(grounding?.evidence_count ?? 0);
+  const hasEvidence = evidenceCount > 0 || Boolean(grounding?.citation_id) || precedentCount > 0;
+  const supportLevel = hasStatementCitation
+    ? "direct"
+    : hasEvidence
+      ? "partial"
+      : "missing";
+
+  return {
+    claim_type,
+    claim_path,
+    title,
+    support_level: supportLevel,
+    citation_ids: statementHits.map((citation) => citation.citation_id).filter(Boolean),
+    reference_ids: [
+      grounding?.law_reference_id,
+      grounding?.reference_id,
+      grounding?.reference_key,
+      ...(Array.isArray(grounding?.precedent_reference_ids) ? grounding.precedent_reference_ids : [])
+    ].filter(Boolean),
+    evidence_count: evidenceCount,
+    precedent_count: precedentCount,
+    has_snippet: Boolean(grounding?.snippet?.text),
+    match_reason: grounding?.match_reason ?? ""
+  };
+}
+
+function buildClaimSupport({ summary, charges, citationMap }) {
+  const entries = charges.map((charge, index) => buildClaimSupportEntry({
+    claim_type: index === 0 && summary ? "summary" : "charge",
+    claim_path: index === 0 && summary ? "legal_analysis.summary" : `legal_analysis.charges[${index}]`,
+    title: index === 0 && summary ? summary : charge.charge,
+    grounding: charge.grounding,
+    citationMap
+  }));
+
+  const counts = entries.reduce((accumulator, entry) => {
+    if (entry.support_level === "direct") accumulator.direct += 1;
+    else if (entry.support_level === "partial") accumulator.partial += 1;
+    else accumulator.missing += 1;
+    return accumulator;
+  }, { direct: 0, partial: 0, missing: 0 });
+
+  return {
+    overall: counts.missing > 0 ? "missing" : counts.partial > 0 ? "partial" : counts.direct > 0 ? "direct" : "missing",
+    direct_count: counts.direct,
+    partial_count: counts.partial,
+    missing_count: counts.missing,
+    entries
+  };
 }
 
 function indexCitations(citations, key) {
@@ -542,6 +602,7 @@ export async function runLegalAnalysisAgent(
   const providerMode = options.providerMode ?? "mock";
   const profileContext = options.profileContext ?? options.userContext ?? null;
   const retrievalPlan = options.retrievalPlan ?? null;
+  const requestText = String(options.request?.text ?? options.request?.query ?? "").trim();
   const facts = getFacts(classificationResult);
   const issueCandidates = getAnalysisIssueCandidates(classificationResult);
 
@@ -554,13 +615,6 @@ export async function runLegalAnalysisAgent(
       lawSearchResult,
       precedentSearchResult
     );
-  const verifier = options.verifier ?? buildPreAnalysisVerifier({
-    classificationResult,
-    retrievalPlan,
-    retrievalEvidencePack: options.retrievalEvidencePack,
-    scopeAssessment,
-    evidencePack
-  });
   const charges = buildCharges(classificationResult, retrievalPlan, evidencePack, scopeAssessment);
   const precedentCards = buildPrecedentCards(evidencePack);
   const summary = buildSummary(issueCandidates, charges, evidencePack, scopeAssessment, facts);
@@ -585,13 +639,34 @@ export async function runLegalAnalysisAgent(
     groundingEvidence: evidencePack,
     issueCandidates,
     baseRiskLevel: Math.max(1, ...issueRiskScores, 1),
-    profileContext
+    profileContext,
+    text: requestText
+  });
+  const highRiskEscalation = evaluateHighRiskEscalation({
+    text: requestText,
+    facts,
+    issueTypes: issueCandidates.map((issue) => issue.type),
+    profileContext,
+    scopeAssessment
   });
   const disclaimer = providerMode === "live"
     ? "본 분석은 공식 법령·판례 API를 참고한 안내용 결과이며 법적 효력은 없습니다. 구체적 대응은 변호사 상담이 필요합니다."
     : "본 분석은 mock 데이터 기반 참고용 초안이며 법적 효력은 없습니다. 구체적 대응은 변호사 상담이 필요합니다.";
 
   const summaryGrounding = buildSummaryGrounding(charges);
+  const claim_support = buildClaimSupport({
+    summary,
+    charges,
+    citationMap
+  });
+  const verifier = options.verifier ?? buildPreAnalysisVerifier({
+    classificationResult,
+    retrievalPlan,
+    retrievalEvidencePack: options.retrievalEvidencePack,
+    scopeAssessment,
+    evidencePack,
+    claimSupport: claim_support
+  });
 
   return {
     mode: providerMode,
@@ -611,10 +686,12 @@ export async function runLegalAnalysisAgent(
     facts_snapshot: facts,
     decision_axis: judgment.decision_axis,
     scope_assessment: judgment.scope_assessment,
+    claim_support,
     verifier,
     grounding_evidence: evidencePack,
     citation_map: citationMap,
     selected_reference_ids: selectedReferenceIds,
-    share_text: `${summary} 우선 원본 증거와 시간 순서를 정리한 뒤, 필요한 경우 전문 상담을 검토하세요.`
+    share_text: `${summary} 우선 원본 증거와 시간 순서를 정리한 뒤, 필요한 경우 전문 상담을 검토하세요.`,
+    high_risk_escalation: highRiskEscalation
   };
 }

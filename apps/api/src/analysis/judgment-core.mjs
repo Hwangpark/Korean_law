@@ -100,7 +100,8 @@ export function buildJudgmentCore({
   baseRiskLevel = 1,
   issueCandidates = [],
   issueTypes,
-  profileContext
+  profileContext,
+  text = ""
 } = {}) {
   const normalizedFacts = normalizeFacts(facts);
   const normalizedScope = normalizeScopeAssessment(scopeAssessment);
@@ -143,8 +144,16 @@ export function buildJudgmentCore({
     risk_level: riskLevel,
     evidence_strength: evidenceStrength,
     scope_assessment: normalizedScope,
-    recommended_actions: buildRecommendedActions(guidanceInput),
-    evidence_to_collect: buildEvidenceToCollect(guidanceInput),
+    recommended_actions: buildRecommendedActions({
+      ...guidanceInput,
+      profileContext,
+      text
+    }),
+    evidence_to_collect: buildEvidenceToCollect({
+      ...guidanceInput,
+      profileContext,
+      text
+    }),
     profile_considerations: buildProfileConsiderations({
       profileContext,
       facts: normalizedFacts,

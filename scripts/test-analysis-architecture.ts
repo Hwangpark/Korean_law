@@ -629,6 +629,13 @@ function verifyVerifierAndSafetyGateContracts(): void {
         score: 0.1,
         label: "low"
       },
+      claim_support: {
+        overall: "missing",
+        direct_count: 0,
+        partial_count: 0,
+        missing_count: 0,
+        entries: []
+      },
       selected_reference_count: 0,
       issue_count: 1,
       warnings: [
@@ -878,6 +885,58 @@ async function verifySaveAnalysisUsesTransactionBoundary(): Promise<void> {
   assert.equal(committedRunInserted, false, "failed transaction must not commit inserted run rows");
 }
 
+function verifyHighRiskEscalationPolicy(): void {
+  const gated = applyPreOutputSafetyGate(
+    {
+      can_sue: true,
+      risk_level: 5,
+      summary: "스토킹과 협박 정황이 보입니다.",
+      recommended_actions: ["기본 정리만 하세요."],
+      evidence_to_collect: ["원본 대화 캡처"],
+      high_risk_escalation: {
+        triggered: true,
+        emergency: true,
+        triggers: ["stalking_escalation", "evidence_deletion_risk", "minor_involved"],
+        warnings: [
+          "반복 접근 또는 스토킹 위험이 보여 빠른 신고 검토가 필요합니다.",
+          "증거 삭제 위험이 보여 보존 조치가 시급합니다."
+        ],
+        immediate_actions: [
+          "접근, 미행, 주거지 주변 대기가 이어지면 차단만 하지 말고 시간순 기록과 함께 112 신고 여부를 바로 검토하세요.",
+          "삭제 전 화면 녹화, 전체 캡처, URL, 계정 식별정보, 시간표시를 먼저 확보하세요."
+        ],
+        evidence_actions: [
+          "삭제 또는 회수 전후가 드러나는 전체 대화 캡처와 화면 녹화"
+        ]
+      }
+    },
+    {
+      verifier: {
+        stage: "pre_analysis_verifier",
+        status: "warning",
+        evidence_sufficient: true,
+        citation_integrity: true,
+        contradiction_detected: false,
+        confidence_calibration: { score: 0.82, label: "high" },
+        selected_reference_count: 2,
+        issue_count: 1,
+        warnings: []
+      },
+      scopeAssessment: {
+        unsupported_issue_present: false,
+        insufficient_facts: false,
+        procedural_heavy: false
+      }
+    }
+  );
+
+  assert.match(String(gated.legalAnalysis.summary), /^긴급성 있는 고위험 신호가 있어 일반 참고보다 안전 확보와 증거 보존을 우선해야 합니다\./);
+  assert.ok(gated.legalAnalysis.recommended_actions.some((item: unknown) => String(item).includes("112")), "high-risk gate should force 112 guidance for emergency cases");
+  assert.ok(gated.legalAnalysis.evidence_to_collect.some((item: unknown) => String(item).includes("화면 녹화")), "high-risk gate should add preservation-heavy evidence guidance");
+  assert.ok(gated.safetyGate.blocked_reasons.includes("stalking_escalation"), "high-risk triggers should become stable block reasons");
+  assert.equal((gated.safetyGate as Record<string, unknown>).adjusted_output, true, "high-risk triggers should always adjust output");
+}
+
 async function main() {
   const ocr = await runOcrAgent({
     input_type: "text",
@@ -927,6 +986,13 @@ async function main() {
       confidence_calibration: {
         score: 0,
         label: ""
+      },
+      claim_support: {
+        overall: "",
+        direct_count: 0,
+        partial_count: 0,
+        missing_count: 0,
+        entries: []
       },
       warnings: []
     },
@@ -1035,6 +1101,26 @@ async function main() {
           confidence_calibration: {
             score: 0.62,
             label: "medium"
+          },
+          claim_support: {
+            overall: "partial",
+            direct_count: 0,
+            partial_count: 1,
+            missing_count: 0,
+            entries: [
+              {
+                claim_type: "summary",
+                claim_path: "legal_analysis.summary",
+                title: "public summary",
+                support_level: "partial",
+                citation_ids: [],
+                reference_ids: ["law:test", "precedent:test"],
+                evidence_count: 2,
+                precedent_count: 1,
+                has_snippet: true,
+                match_reason: "요건이 직접 맞닿아 있습니다."
+              }
+            ]
           },
           warnings: ["careful"]
         },
@@ -1164,6 +1250,26 @@ async function main() {
       confidence_calibration: {
         score: 0.62,
         label: "medium"
+      },
+      claim_support: {
+        overall: "partial",
+        direct_count: 0,
+        partial_count: 1,
+        missing_count: 0,
+        entries: [
+          {
+            claim_type: "summary",
+            claim_path: "legal_analysis.summary",
+            title: "public summary",
+            support_level: "partial",
+            citation_ids: [],
+            reference_ids: ["law:test", "precedent:test"],
+            evidence_count: 2,
+            precedent_count: 1,
+            has_snippet: true,
+            match_reason: "요건이 직접 맞닿아 있습니다."
+          }
+        ]
       },
       warnings: ["careful"]
     },
@@ -1765,6 +1871,8 @@ async function main() {
     "normalized analysis should retain citation path indexing"
   );
   assert.equal(citationLinkedAnalysis.verifier?.citation_integrity, true, "citation-linked analysis should preserve verifier integrity result");
+  assert.equal(citationLinkedAnalysis.claim_support?.overall, "direct", "citation-linked analysis should expose direct claim support when statement citations are present");
+  assert.equal(citationLinkedAnalysis.verifier?.claim_support?.overall, "direct", "verifier should mirror claim support coverage");
 
   const orchestratedCitationLinkedAnalysis = await runAnalysis(
     {
@@ -1858,6 +1966,7 @@ async function main() {
   );
 
   verifyVerifierAndSafetyGateContracts();
+  verifyHighRiskEscalationPolicy();
 
   await verifyAnalysisGuestQuotaIgnoresForgedForwardedFor();
   await verifyInvalidAnalysisDoesNotConsumeGuestQuota();

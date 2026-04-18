@@ -12,6 +12,7 @@ export function applyPreOutputSafetyGate(legalAnalysis, { verifier, scopeAssessm
   const lowConfidence = verifier?.confidence_calibration?.label === "low";
   const needsCaution = verifier?.status === "needs_caution";
   const highRisk = Number(safeAnalysis?.risk_level ?? 0) >= 4;
+  const highRiskEscalation = safeAnalysis?.high_risk_escalation ?? null;
 
   if (scopeAssessment?.unsupported_issue_present) {
     warnings.push("지원 범위 밖 이슈가 포함될 수 있어 단정적 해석을 피했습니다.");
@@ -37,13 +38,29 @@ export function applyPreOutputSafetyGate(legalAnalysis, { verifier, scopeAssessm
   if ((needsCaution || lowConfidence) && typeof safeAnalysis.summary === "string" && safeAnalysis.summary.trim()) {
     safeAnalysis.summary = `현재 확보된 근거 기준 참고용 판단입니다. ${safeAnalysis.summary}`;
   }
+  if (highRiskEscalation?.triggered && typeof safeAnalysis.summary === "string" && safeAnalysis.summary.trim()) {
+    safeAnalysis.summary = `긴급성 있는 고위험 신호가 있어 일반 참고보다 안전 확보와 증거 보존을 우선해야 합니다. ${safeAnalysis.summary}`;
+    warnings.push(...(Array.isArray(highRiskEscalation.warnings) ? highRiskEscalation.warnings : []));
+    blockedReasons.push(...(Array.isArray(highRiskEscalation.triggers) ? highRiskEscalation.triggers : []));
+  }
 
   const recommendedActions = Array.isArray(safeAnalysis.recommended_actions)
     ? safeAnalysis.recommended_actions.filter(Boolean)
     : [];
-  if (highRisk && !recommendedActions.some((item) => String(item).includes("변호사 상담"))) {
+  if (highRiskEscalation?.triggered) {
+    recommendedActions.unshift(...(Array.isArray(highRiskEscalation.immediate_actions) ? highRiskEscalation.immediate_actions : []));
+    safeAnalysis.evidence_to_collect = unique([
+      ...(Array.isArray(safeAnalysis.evidence_to_collect) ? safeAnalysis.evidence_to_collect : []),
+      ...(Array.isArray(highRiskEscalation.evidence_actions) ? highRiskEscalation.evidence_actions : [])
+    ]);
+  }
+  if ((highRisk || highRiskEscalation?.emergency) && !recommendedActions.some((item) => String(item).includes("변호사 상담"))) {
     recommendedActions.push("고위험 사안일 수 있어 원본 증거를 보존한 뒤 변호사 상담 필요성을 빠르게 검토하세요.");
     warnings.push("고위험 상황 상담 권고를 보강했습니다.");
+  }
+  if (highRiskEscalation?.emergency && !recommendedActions.some((item) => String(item).includes("112"))) {
+    recommendedActions.unshift("지금 신체 안전 위험이나 지속적 접근이 의심되면 즉시 112 신고를 우선 검토하세요.");
+    warnings.push("긴급 신고 우선 안내를 보강했습니다.");
   }
   safeAnalysis.recommended_actions = unique(recommendedActions);
   safeAnalysis.next_steps = unique(Array.isArray(safeAnalysis.next_steps) ? safeAnalysis.next_steps : safeAnalysis.recommended_actions);
@@ -51,9 +68,10 @@ export function applyPreOutputSafetyGate(legalAnalysis, { verifier, scopeAssessm
   const safetyGate = {
     stage: "pre_output_safety_gate",
     status: blockedReasons.length === 0 ? "passed" : "adjusted",
-    adjusted_output: blockedReasons.length > 0 || highRisk,
+    adjusted_output: blockedReasons.length > 0 || highRisk || Boolean(highRiskEscalation?.triggered),
     blocked_reasons: unique(blockedReasons),
-    warnings: unique(warnings)
+    warnings: unique(warnings),
+    ...(highRiskEscalation?.triggered ? { escalation: highRiskEscalation } : {})
   };
 
   safeAnalysis.safety_gate = safetyGate;

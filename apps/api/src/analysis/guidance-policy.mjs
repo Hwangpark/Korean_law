@@ -1,3 +1,5 @@
+import { evaluateHighRiskEscalation } from "./high-risk-policy.mjs";
+
 function unique(values) {
   return [...new Set((values ?? []).filter(Boolean))];
 }
@@ -6,7 +8,14 @@ function hasIssue(issueTypes, target) {
   return issueTypes.has(target);
 }
 
-export function buildRecommendedActions({ scopeAssessment, facts = {}, issueCandidates = [], issueTypes = new Set() }) {
+export function buildRecommendedActions({
+  scopeAssessment,
+  facts = {},
+  issueCandidates = [],
+  issueTypes = new Set(),
+  profileContext,
+  text = ""
+}) {
   const actions = [
     "원본 대화, 게시글 URL, 작성 시각이 보이는 형태로 원본을 보관해 두세요.",
     "발언 순서와 맥락이 드러나도록 앞뒤 대화까지 함께 정리해 두세요."
@@ -18,6 +27,18 @@ export function buildRecommendedActions({ scopeAssessment, facts = {}, issueCand
 
   if (scopeAssessment?.insufficient_facts) {
     actions.push("공개 범위, 반복 여부, 허위 여부, 금전 요구 여부 같은 핵심 사실관계를 추가로 적어 주세요.");
+  }
+
+  const escalation = evaluateHighRiskEscalation({
+    text,
+    facts,
+    issueTypes: [...issueTypes],
+    profileContext,
+    scopeAssessment
+  });
+
+  if (escalation.triggered) {
+    actions.unshift(...escalation.immediate_actions);
   }
 
   if (facts.personal_info_exposed || hasIssue(issueTypes, "개인정보 유출")) {
@@ -43,7 +64,14 @@ export function buildRecommendedActions({ scopeAssessment, facts = {}, issueCand
   return unique(actions);
 }
 
-export function buildEvidenceToCollect({ scopeAssessment, facts = {}, issueCandidates = [], issueTypes = new Set() }) {
+export function buildEvidenceToCollect({
+  scopeAssessment,
+  facts = {},
+  issueCandidates = [],
+  issueTypes = new Set(),
+  profileContext,
+  text = ""
+}) {
   const items = [
     "원본 캡처 또는 원문 텍스트",
     "게시·전송 시각과 URL 또는 방 이름",
@@ -68,6 +96,17 @@ export function buildEvidenceToCollect({ scopeAssessment, facts = {}, issueCandi
 
   if (scopeAssessment?.insufficient_facts) {
     items.push("공개 범위, 반복 여부, 피해 발생 시점에 대한 추가 설명");
+  }
+
+  const escalation = evaluateHighRiskEscalation({
+    text,
+    facts,
+    issueTypes: [...issueTypes],
+    profileContext,
+    scopeAssessment
+  });
+  if (escalation.triggered) {
+    items.push(...escalation.evidence_actions);
   }
 
   if (issueCandidates.some((issue) => issue?.legal_element_signals?.includes("public_disclosure"))) {
