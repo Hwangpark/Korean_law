@@ -336,6 +336,87 @@ function assertStoredProjectionSanitizesPreviewBoundary(internal: KeywordVerific
   );
 }
 
+function assertPublicProjectionSanitizesPreviewBoundary(internal: KeywordVerificationResponse): void {
+  const publicProjection = buildPublicKeywordVerificationResponse({
+    ...internal,
+    retrieval_preview: {
+      law: {
+        ...(internal.retrieval_preview?.law ?? {
+          headline: "law",
+          top_issues: [],
+          top_laws: [],
+          top_precedents: [],
+          profile_flags: [],
+          disclaimer: ""
+        }),
+        top_laws: [
+          {
+            id: "law-public-preview",
+            title: "형법 제307조",
+            summary: "명예훼손",
+            reference: { raw_text: "should-drop" },
+            retrieval_trace: [{ private_debug: "should-drop" }]
+          } as Record<string, unknown>
+        ]
+      },
+      precedent: {
+        ...(internal.retrieval_preview?.precedent ?? {
+          headline: "precedent",
+          top_issues: [],
+          top_laws: [],
+          top_precedents: [],
+          profile_flags: [],
+          disclaimer: ""
+        }),
+        top_precedents: [
+          {
+            id: "precedent-public-preview",
+            title: "대법원 2026도1",
+            summary: "판례",
+            citation_map: { private_debug: "should-drop" },
+            provider_payload: { raw: true }
+          } as Record<string, unknown>
+        ]
+      }
+    }
+  });
+
+  assert.deepEqual(
+    publicProjection.retrieval_preview,
+    {
+      law: {
+        headline: internal.retrieval_preview?.law?.headline ?? "law",
+        top_issues: internal.retrieval_preview?.law?.top_issues ?? [],
+        top_laws: [
+          {
+            id: "law-public-preview",
+            title: "형법 제307조",
+            summary: "명예훼손"
+          }
+        ],
+        top_precedents: internal.retrieval_preview?.law?.top_precedents ?? [],
+        profile_flags: internal.retrieval_preview?.law?.profile_flags ?? [],
+        disclaimer: internal.retrieval_preview?.law?.disclaimer ?? ""
+      },
+      precedent: {
+        headline: internal.retrieval_preview?.precedent?.headline ?? "precedent",
+        top_issues: internal.retrieval_preview?.precedent?.top_issues ?? [],
+        top_laws: internal.retrieval_preview?.precedent?.top_laws ?? [],
+        top_precedents: [
+          {
+            id: "precedent-public-preview",
+            title: "대법원 2026도1",
+            summary: "판례"
+          }
+        ],
+        profile_flags: internal.retrieval_preview?.precedent?.profile_flags ?? [],
+        disclaimer: internal.retrieval_preview?.precedent?.disclaimer ?? ""
+      }
+    },
+    "public retrieval_preview should expose only stable preview fields, not provenance/debug payloads"
+  );
+}
+
 function assertStoredProjectionSanitizesTraceBoundary(internal: KeywordVerificationResponse): void {
   const stored = buildStoredKeywordVerificationResponse({
     ...internal,
@@ -825,6 +906,7 @@ async function main(): Promise<void> {
 
   assertStoredBoundary(buildStoredKeywordVerificationResponse(internal), internal);
   assertStoredProjectionSanitizesPreviewBoundary(internal);
+  assertPublicProjectionSanitizesPreviewBoundary(internal);
   assertStoredProjectionSanitizesTraceBoundary(internal);
   assertSensitiveQueryProvenanceBoundary(internal);
   assertReferenceSeedsInferActualProviderSource();
