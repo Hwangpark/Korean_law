@@ -139,6 +139,17 @@ function sanitizePreviewCardList(value: unknown): Array<Record<string, unknown>>
     .filter((item) => item.id || item.title);
 }
 
+const SENSITIVE_QUERY_SOURCES = new Set(["fact", "profile", "llm", "hypothesis"]);
+
+function sanitizePublicQueryText(text: unknown, sources: string[]): string {
+  const sensitiveSources = sources.filter((source) => SENSITIVE_QUERY_SOURCES.has(source));
+  if (sensitiveSources.length > 0) {
+    return `비공개 질의(${sensitiveSources.join(",")})`;
+  }
+
+  return maskPersonalInfoText(text);
+}
+
 function sanitizeQueryRefList(value: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) {
     return [];
@@ -146,14 +157,17 @@ function sanitizeQueryRefList(value: unknown): Array<Record<string, unknown>> {
 
   return value
     .map((item) => asRecord(item))
-    .map((item) => ({
-      text: asString(item.text),
-      bucket: asString(item.bucket),
-      channel: asString(item.channel),
-      sources: sanitizeStringArray(item.sources),
-      issue_types: sanitizeStringArray(item.issue_types),
-      legal_element_signals: sanitizeStringArray(item.legal_element_signals)
-    }))
+    .map((item) => {
+      const sources = sanitizeStringArray(item.sources);
+      return {
+        text: asString(sanitizePublicQueryText(item.text, sources)),
+        bucket: asString(item.bucket),
+        channel: asString(item.channel),
+        sources,
+        issue_types: sanitizeStringArray(item.issue_types),
+        legal_element_signals: sanitizeStringArray(item.legal_element_signals)
+      };
+    })
     .filter((item) => item.text);
 }
 
