@@ -4,6 +4,7 @@ import {
   formatSupportLevel,
   formatVerifierStatus,
   getAuthoritySignal,
+  getFreshnessSignal,
   getRuntimeTrustHeadline,
 } from './trust-status';
 
@@ -50,6 +51,27 @@ assertEqual(
   getRuntimeTrustHeadline({ providerMode: 'live', providerSource: 'live_fallback' }),
   'fixture fallback 결과',
   'live fallback provider label',
+);
+
+assertEqual(
+  getFreshnessSignal({ providerMode: 'mock', providerSource: 'fixture' }).label,
+  'mock 근거',
+  'mock freshness label',
+);
+assertEqual(
+  getFreshnessSignal({ providerMode: 'live', providerSource: 'fixture' }).label,
+  'fixture 대체',
+  'live mode fixture freshness label',
+);
+assertEqual(
+  getFreshnessSignal({ providerMode: 'live', providerSource: 'live_fallback' }).level,
+  'fallback',
+  'fallback freshness level',
+);
+assertEqual(
+  getFreshnessSignal({ providerMode: 'live', providerSource: 'live' }).headline,
+  '실제 provider에서 조회한 근거입니다.',
+  'live freshness headline',
 );
 
 assertEqual(

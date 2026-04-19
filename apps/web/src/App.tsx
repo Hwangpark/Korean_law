@@ -35,6 +35,7 @@ import {
   formatSupportLevel,
   formatVerifierStatus,
   getAuthoritySignal,
+  getFreshnessSignal,
   getRuntimeTrustHeadline,
   type AnswerDisposition,
   type ProviderSource,
@@ -1769,6 +1770,7 @@ export default function App() {
         unsupportedPointCount: result.fact_sheet?.unsupportedPoints.length,
       })
     : null;
+  const resultFreshnessSignal = resultRuntimeTrust ? getFreshnessSignal(resultRuntimeTrust) : null;
   const keywordAuthoritySignal = keywordResult
     ? getAuthoritySignal({
         answerDisposition: keywordResult.answer_disposition,
@@ -1781,6 +1783,7 @@ export default function App() {
         unsupportedPointCount: keywordResult.fact_sheet?.unsupportedPoints.length,
       })
     : null;
+  const keywordFreshnessSignal = keywordRuntimeTrust ? getFreshnessSignal(keywordRuntimeTrust) : null;
   const claimSupportPreview = result?.claim_support?.entries.slice(0, 4) ?? [];
 
   function closeAnalysisStream() {
@@ -2747,6 +2750,12 @@ export default function App() {
                   {keywordRuntimeTrust.notice}
                 </p>
               )}
+              {keywordFreshnessSignal && (
+                <div className="provenance-chip-row provenance-chip-row-secondary">
+                  <span className="provenance-chip provenance-chip-soft">{keywordFreshnessSignal.label}</span>
+                  <span className="provenance-inline-copy">{keywordFreshnessSignal.headline}</span>
+                </div>
+              )}
               {(keywordResult.verifier || keywordResult.claim_support) && (
                 <div className="provenance-chip-row provenance-chip-row-secondary">
                   {keywordResult.verifier && (
@@ -2953,6 +2962,12 @@ export default function App() {
                 {' '}
                 {resultRuntimeTrust.notice}
               </p>
+            )}
+            {resultFreshnessSignal && (
+              <div className="provenance-chip-row provenance-chip-row-secondary">
+                <span className="provenance-chip provenance-chip-soft">{resultFreshnessSignal.label}</span>
+                <span className="provenance-inline-copy">{resultFreshnessSignal.headline}</span>
+              </div>
             )}
             {provenanceSummary.length > 0 && (
               <div className="provenance-chip-row">

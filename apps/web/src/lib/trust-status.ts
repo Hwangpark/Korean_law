@@ -7,6 +7,7 @@ export type RuntimeTrustLike = {
 };
 
 export type AuthoritySignalLevel = 'review_ready' | 'limited' | 'handoff';
+export type FreshnessSignalLevel = 'live' | 'fixture' | 'fallback';
 
 export type AuthoritySignalInput = {
   answerDisposition?: AnswerDisposition | null;
@@ -25,6 +26,13 @@ export type AuthoritySignal = {
   headline: string;
   description: string;
   reasons: string[];
+};
+
+export type FreshnessSignal = {
+  level: FreshnessSignalLevel;
+  label: string;
+  headline: string;
+  description: string;
 };
 
 export function formatVerifierStatus(status: string) {
@@ -85,6 +93,33 @@ export function getRuntimeTrustHeadline(trust: RuntimeTrustLike) {
   }
 
   return trust.providerMode === 'live' ? 'fixture 기준 응답' : `${formatProviderSourceLabel('fixture')} 결과`;
+}
+
+export function getFreshnessSignal(trust: RuntimeTrustLike): FreshnessSignal {
+  if (trust.providerSource === 'live') {
+    return {
+      level: 'live',
+      label: '실시간 근거',
+      headline: '실제 provider에서 조회한 근거입니다.',
+      description: '그래도 결과는 참고용이며 원문과 최신 개정 여부를 함께 확인해야 합니다.',
+    };
+  }
+
+  if (trust.providerSource === 'live_fallback') {
+    return {
+      level: 'fallback',
+      label: 'fallback 근거',
+      headline: 'live 요청이 fixture 근거로 대체됐습니다.',
+      description: '실시간 법령·판례 조회가 아니므로 상담 또는 원문 조회 전 단계로 봐야 합니다.',
+    };
+  }
+
+  return {
+    level: 'fixture',
+    label: trust.providerMode === 'live' ? 'fixture 대체' : 'mock 근거',
+    headline: '로컬 fixture 기준으로 만든 참고 결과입니다.',
+    description: '실시간 법령·판례 조회가 아니므로 최신성 확인과 전문가 검토가 필요할 수 있습니다.',
+  };
 }
 
 export function getAuthoritySignal(input: AuthoritySignalInput): AuthoritySignal {
