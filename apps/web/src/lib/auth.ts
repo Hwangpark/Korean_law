@@ -139,6 +139,7 @@ export type AnalysisLegalResult = {
   can_sue?: boolean;
   risk_level?: number;
   summary?: string;
+  answer_disposition?: 'direct_answer' | 'limited_answer' | 'handoff_recommended' | 'safety_first_handoff';
   review_recommendation?: {
     handoff_recommended?: boolean;
     abstain_reasons?: string[];

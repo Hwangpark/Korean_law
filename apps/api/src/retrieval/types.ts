@@ -442,6 +442,7 @@ export interface KeywordVerificationResponse {
       abstain_reasons: string[];
       uncertainty_reasons: string[];
     };
+    answer_disposition?: 'direct_answer' | 'limited_answer' | 'handoff_recommended' | 'safety_first_handoff';
     precedent_cards: Array<{
       case_no: string;
       court: string;

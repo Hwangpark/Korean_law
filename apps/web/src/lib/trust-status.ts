@@ -1,4 +1,5 @@
 export type ProviderSource = 'fixture' | 'live' | 'live_fallback';
+export type AnswerDisposition = 'direct_answer' | 'limited_answer' | 'handoff_recommended' | 'safety_first_handoff';
 
 export type RuntimeTrustLike = {
   providerMode?: string;
@@ -8,6 +9,7 @@ export type RuntimeTrustLike = {
 export type AuthoritySignalLevel = 'review_ready' | 'limited' | 'handoff';
 
 export type AuthoritySignalInput = {
+  answerDisposition?: AnswerDisposition | null;
   handoffRecommended?: boolean;
   abstainReasons?: string[];
   uncertaintyReasons?: string[];
@@ -101,12 +103,42 @@ export function getAuthoritySignal(input: AuthoritySignalInput): AuthoritySignal
     unsupportedPointCount > 0 ? `미확인 주장 ${unsupportedPointCount}개가 있습니다.` : '',
   ].filter((reason): reason is string => reason.length > 0);
 
-  if (input.handoffRecommended || abstainReasons.length > 0) {
+  if (input.answerDisposition === 'safety_first_handoff') {
+    return {
+      level: 'handoff',
+      label: '안전 우선 인계',
+      headline: '법률 판단보다 안전 확보와 전문가 연결을 먼저 봐야 하는 상태입니다.',
+      description: '고위험 신호가 있어 일반 안내보다 안전 조치, 증거 보존, 즉시 상담 여부 확인이 우선입니다.',
+      reasons,
+    };
+  }
+
+  if (input.answerDisposition === 'handoff_recommended' || input.handoffRecommended || abstainReasons.length > 0) {
     return {
       level: 'handoff',
       label: '전문가 인계 필요',
       headline: '현재 결과는 확정 판단이 아니라 전문가 검토 전 단계입니다.',
       description: '판단 보류 또는 중대한 불확실성이 있어 상담과 원자료 확인을 우선해야 합니다.',
+      reasons,
+    };
+  }
+
+  if (input.answerDisposition === 'limited_answer') {
+    return {
+      level: 'limited',
+      label: '제한적 참고',
+      headline: '근거가 일부 제한되어 결론을 낮은 강도로 봐야 합니다.',
+      description: '누락 사실과 지원 수준을 확인하기 전에는 고소 가능성이나 책임 판단을 단정하지 않습니다.',
+      reasons,
+    };
+  }
+
+  if (input.answerDisposition === 'direct_answer') {
+    return {
+      level: 'review_ready',
+      label: '근거 기반 참고',
+      headline: '현재 입력과 연결 근거 안에서는 검토 가능한 상태입니다.',
+      description: '그래도 본 결과는 참고용이며 법적 효력이나 전문가 의견을 대체하지 않습니다.',
       reasons,
     };
   }

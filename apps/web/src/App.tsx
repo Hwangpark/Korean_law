@@ -36,6 +36,7 @@ import {
   formatVerifierStatus,
   getAuthoritySignal,
   getRuntimeTrustHeadline,
+  type AnswerDisposition,
   type ProviderSource,
 } from './lib/trust-status';
 import {
@@ -175,6 +176,7 @@ type AnalysisResult = {
   fact_sheet?: FactSheet | null;
   claim_support?: ClaimSupport | null;
   verifier?: VerifierSummary | null;
+  answer_disposition?: AnswerDisposition | null;
   review_recommendation?: ReviewRecommendation | null;
   charges: Charge[];
   recommended_actions: string[];
@@ -1051,6 +1053,15 @@ function normalizeVerifier(value: unknown): VerifierSummary | null {
   return verifier;
 }
 
+function normalizeAnswerDisposition(value: unknown): AnswerDisposition | null {
+  return value === 'direct_answer'
+    || value === 'limited_answer'
+    || value === 'handoff_recommended'
+    || value === 'safety_first_handoff'
+    ? value
+    : null;
+}
+
 function normalizeReviewRecommendation(value: unknown): ReviewRecommendation | null {
   if (!isRecord(value)) {
     return null;
@@ -1071,6 +1082,7 @@ function normalizeReviewRecommendation(value: unknown): ReviewRecommendation | n
 
 function buildTrustDetail(result: AnalysisResult): DetailPanelData {
   const authoritySignal = getAuthoritySignal({
+    answerDisposition: result.answer_disposition,
     handoffRecommended: result.review_recommendation?.handoffRecommended,
     abstainReasons: result.review_recommendation?.abstainReasons,
     uncertaintyReasons: result.review_recommendation?.uncertaintyReasons,
@@ -1175,6 +1187,7 @@ function normalizeAnalysisResult(
     fact_sheet: normalizeFactSheet(result.fact_sheet),
     claim_support: normalizeClaimSupport(result.claim_support),
     verifier: normalizeVerifier(result.verifier),
+    answer_disposition: normalizeAnswerDisposition((result as Record<string, unknown>).answer_disposition),
     review_recommendation: normalizeReviewRecommendation((result as Record<string, unknown>).review_recommendation),
     profile_guidance: normalizeProfileGuidance(
       result.profile_guidance ?? result.profile_context ?? result.user_profile,
@@ -1746,6 +1759,7 @@ export default function App() {
     : [];
   const authoritySignal = result
     ? getAuthoritySignal({
+        answerDisposition: result.answer_disposition,
         handoffRecommended: result.review_recommendation?.handoffRecommended,
         abstainReasons: result.review_recommendation?.abstainReasons,
         uncertaintyReasons: result.review_recommendation?.uncertaintyReasons,
@@ -1757,6 +1771,7 @@ export default function App() {
     : null;
   const keywordAuthoritySignal = keywordResult
     ? getAuthoritySignal({
+        answerDisposition: keywordResult.answer_disposition,
         handoffRecommended: keywordResult.review_recommendation?.handoffRecommended,
         abstainReasons: keywordResult.review_recommendation?.abstainReasons,
         uncertaintyReasons: keywordResult.review_recommendation?.uncertaintyReasons,

@@ -54,6 +54,7 @@ assertEqual(
 
 assertEqual(
   getAuthoritySignal({
+    answerDisposition: 'direct_answer',
     evidenceSufficient: true,
     claimSupportOverall: 'direct',
     missingPointCount: 0,
@@ -64,6 +65,7 @@ assertEqual(
 );
 assertEqual(
   getAuthoritySignal({
+    answerDisposition: 'limited_answer',
     evidenceSufficient: false,
     claimSupportOverall: 'partial',
     missingPointCount: 2,
@@ -74,6 +76,16 @@ assertEqual(
 );
 assertEqual(
   getAuthoritySignal({
+    answerDisposition: 'direct_answer',
+    evidenceSufficient: false,
+    claimSupportOverall: 'partial',
+  }).level,
+  'review_ready',
+  'authority should prefer direct answer disposition when present',
+);
+assertEqual(
+  getAuthoritySignal({
+    answerDisposition: 'handoff_recommended',
     handoffRecommended: true,
     abstainReasons: ['상대방 신원 확인 필요'],
     evidenceSufficient: false,
@@ -81,4 +93,12 @@ assertEqual(
   }).level,
   'handoff',
   'authority handoff level',
+);
+assertEqual(
+  getAuthoritySignal({
+    answerDisposition: 'safety_first_handoff',
+    uncertaintyReasons: ['긴급 대응 필요'],
+  }).label,
+  '안전 우선 인계',
+  'authority safety-first label',
 );

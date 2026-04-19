@@ -253,8 +253,26 @@ async function main(): Promise<void> {
     throw new Error("expected keyword review recommendation abstain reasons.");
   }
 
-  if (result.legal_analysis.safety_gate?.status !== "passed" && result.legal_analysis.review_recommendation.abstain_reasons.length === 0) {
-    throw new Error("expected adjusted keyword outputs to explain why the answer abstained.");
+  if (
+    result.legal_analysis.answer_disposition !== "direct_answer"
+    && result.legal_analysis.answer_disposition !== "limited_answer"
+    && result.legal_analysis.answer_disposition !== "handoff_recommended"
+    && result.legal_analysis.answer_disposition !== "safety_first_handoff"
+  ) {
+    throw new Error("expected keyword legal_analysis to expose a stable answer disposition.");
+  }
+
+  if (result.legal_analysis.safety_gate?.status !== "passed") {
+    if (result.legal_analysis.review_recommendation.abstain_reasons.length === 0) {
+      throw new Error("expected adjusted keyword outputs to explain why the answer abstained.");
+    }
+
+    if (
+      result.legal_analysis.answer_disposition !== "handoff_recommended"
+      && result.legal_analysis.answer_disposition !== "safety_first_handoff"
+    ) {
+      throw new Error("expected adjusted keyword outputs to force a handoff disposition.");
+    }
   }
 
   if (typeof result.legal_analysis.can_sue !== "boolean" || typeof result.legal_analysis.risk_level !== "number") {

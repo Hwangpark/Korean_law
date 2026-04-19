@@ -1,3 +1,4 @@
+import { sanitizeAnswerDisposition } from "../analysis/answer-disposition.mjs";
 import { sanitizePublicProfileContext } from "../analysis/profile-context.js";
 import type {
   CandidateIssue,
@@ -537,6 +538,7 @@ function sanitizePublicLegalAnalysis(
     verifier: sanitizeVerifier(legalAnalysis?.verifier),
     safety_gate: sanitizeSafetyGate(legalAnalysis?.safety_gate),
     review_recommendation: sanitizeReviewRecommendation(legalAnalysis),
+    answer_disposition: sanitizeAnswerDisposition(legalAnalysis?.answer_disposition),
     selected_reference_ids: sanitizeStringArray(legalAnalysis?.selected_reference_ids),
     charges: sanitizePublicCharges(legalAnalysis?.charges),
     recommended_actions: sanitizeStringArray(legalAnalysis?.recommended_actions),

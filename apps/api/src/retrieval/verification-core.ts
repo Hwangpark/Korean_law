@@ -4,6 +4,7 @@ import {
   buildJudgmentProfileConsiderations
 } from "../analysis/judgment-core.mjs";
 import { buildClaimSupport } from "../analysis/claim-support.mjs";
+import { buildAnswerDisposition } from "../analysis/answer-disposition.mjs";
 import { applyPreOutputSafetyGate } from "../analysis/safety-gate.mjs";
 import type {
   CandidateIssue,
@@ -411,9 +412,18 @@ export function buildLegalAnalysisPayload(
     scopeAssessment: input.scopeAssessment
   });
 
+  const reviewRecommendation = buildReviewRecommendation(gatedAnalysis);
+
   return {
     ...gatedAnalysis,
-    review_recommendation: buildReviewRecommendation(gatedAnalysis)
+    review_recommendation: reviewRecommendation,
+    answer_disposition: buildAnswerDisposition({
+      handoffRecommended: reviewRecommendation.handoff_recommended,
+      abstainReasons: reviewRecommendation.abstain_reasons,
+      uncertaintyReasons: reviewRecommendation.uncertainty_reasons,
+      verifierStatus: gatedAnalysis.verifier?.status,
+      blockedReasons: gatedAnalysis.safety_gate?.blocked_reasons
+    })
   };
 }
 
