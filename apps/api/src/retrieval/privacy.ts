@@ -182,6 +182,7 @@ function sanitizeRetrievalTrace(value: KeywordVerificationResponse["retrieval_tr
 
 function sanitizePublicReferenceCard(card: VerifiedReferenceCard): Record<string, unknown> {
   const matchedQueryRefs = sanitizePublicQueryRefs(card.matchedQueries);
+  const providerSource = sanitizeString(card.reference?.sourceMode);
   return {
     id: sanitizeString(card.id),
     referenceKey: sanitizeString(card.referenceKey),
@@ -196,6 +197,12 @@ function sanitizePublicReferenceCard(card: VerifiedReferenceCard): Record<string
     provenanceSummary: buildProvenanceSummary(matchedQueryRefs),
     matchedIssueTypes: sanitizeStringArray(card.matchedIssueTypes),
     snippet: sanitizeString(card.snippet?.text),
+    ...(providerSource ? {
+      sourceMode: providerSource,
+      source_mode: providerSource,
+      providerSource,
+      provider_source: providerSource
+    } : {}),
     source: {
       law_name: sanitizeString(card.source?.law_name),
       article_no: sanitizeString(card.source?.article_no),

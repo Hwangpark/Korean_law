@@ -131,6 +131,32 @@ function asNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function inferSourceModeFromResult(result: Record<string, unknown>, fallbackSourceMode: string): string {
+  const meta = asRecord(result.meta);
+  const traceEntries = [
+    ...(Array.isArray(meta.retrieval_trace) ? meta.retrieval_trace : []),
+    ...(Array.isArray(asRecord(result.law_search).retrieval_trace) ? asRecord(result.law_search).retrieval_trace as unknown[] : []),
+    ...(Array.isArray(asRecord(result.precedent_search).retrieval_trace) ? asRecord(result.precedent_search).retrieval_trace as unknown[] : [])
+  ];
+
+  for (const rawEntry of traceEntries) {
+    const entry = asRecord(rawEntry);
+    const reason = normalizeText(entry.reason).toLowerCase();
+    if (reason.includes("provider_source=live_fallback")) {
+      return "live_fallback";
+    }
+    if (reason.includes("provider_source=live")) {
+      return "live";
+    }
+    if (reason.includes("provider_source=fixture")) {
+      return "fixture";
+    }
+  }
+
+  const normalizedFallback = normalizeText(fallbackSourceMode).toLowerCase();
+  return normalizedFallback || "fixture";
+}
+
 function buildLawSeed(law: Record<string, unknown>, sourceMode: string): ReferenceSeed {
   const lawName = normalizeText(law.law_name);
   const articleNo = normalizeText(law.article_no);
@@ -228,14 +254,15 @@ function buildPrecedentSeed(precedent: Record<string, unknown>, sourceMode: stri
 }
 
 export function buildReferenceSeeds(result: Record<string, unknown>, sourceMode: string): ReferenceSeed[] {
+  const inferredSourceMode = inferSourceModeFromResult(result, sourceMode);
   const lawSearch = asRecord(result.law_search);
   const precedentSearch = asRecord(result.precedent_search);
   const laws = Array.isArray(lawSearch.laws) ? lawSearch.laws.map((law) => asRecord(law)) : [];
   const precedents = Array.isArray(precedentSearch.precedents) ? precedentSearch.precedents.map((precedent) => asRecord(precedent)) : [];
 
   return [
-    ...laws.map((law) => buildLawSeed(law, sourceMode)),
-    ...precedents.map((precedent) => buildPrecedentSeed(precedent, sourceMode))
+    ...laws.map((law) => buildLawSeed(law, inferredSourceMode)),
+    ...precedents.map((precedent) => buildPrecedentSeed(precedent, inferredSourceMode))
   ];
 }
 

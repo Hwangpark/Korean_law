@@ -1,5 +1,6 @@
 import {
   formatConfidenceLabel,
+  formatProviderSourceLabel,
   formatSupportLevel,
   formatVerifierStatus,
   getRuntimeTrustHeadline,
@@ -24,6 +25,10 @@ assertEqual(formatConfidenceLabel(''), '미상', 'empty confidence label');
 assertEqual(formatSupportLevel('direct'), '직접 뒷받침', 'direct support label');
 assertEqual(formatSupportLevel('partial'), '부분 뒷받침', 'partial support label');
 assertEqual(formatSupportLevel('missing'), '근거 부족', 'missing support label');
+
+assertEqual(formatProviderSourceLabel('live'), '실제 provider', 'live provider source label');
+assertEqual(formatProviderSourceLabel('live_fallback'), 'fixture fallback', 'fallback provider source label');
+assertEqual(formatProviderSourceLabel('fixture'), 'mock fixture', 'fixture provider source label');
 
 assertEqual(
   getRuntimeTrustHeadline({ providerMode: 'mock', providerSource: 'fixture' }),

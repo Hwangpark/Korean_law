@@ -13,10 +13,16 @@ import {
   buildRetrievalEvidencePack
 } from "../retrieval/verification.js";
 
-function buildPseudoAnalysisResult(laws, precedents) {
+function buildPseudoAnalysisResult(lawSearch, precedentSearch) {
   return {
-    law_search: { laws },
-    precedent_search: { precedents }
+    law_search: {
+      laws: Array.isArray(lawSearch?.laws) ? lawSearch.laws : [],
+      retrieval_trace: Array.isArray(lawSearch?.retrieval_trace) ? lawSearch.retrieval_trace : []
+    },
+    precedent_search: {
+      precedents: Array.isArray(precedentSearch?.precedents) ? precedentSearch.precedents : [],
+      retrieval_trace: Array.isArray(precedentSearch?.retrieval_trace) ? precedentSearch.retrieval_trace : []
+    }
   };
 }
 
@@ -24,8 +30,8 @@ function buildReferenceMap(items) {
   return new Map((items ?? []).map((item) => [item.id, item]));
 }
 
-async function buildReferenceLibrary({ providerMode, laws, precedents, saveReferenceLibrary }) {
-  const pseudoResult = buildPseudoAnalysisResult(laws, precedents);
+async function buildReferenceLibrary({ providerMode, lawSearch, precedentSearch, saveReferenceLibrary }) {
+  const pseudoResult = buildPseudoAnalysisResult(lawSearch, precedentSearch);
   const referenceSeeds = buildReferenceSeeds(pseudoResult, providerMode);
 
   if (typeof saveReferenceLibrary === "function") {
@@ -61,8 +67,8 @@ export async function buildCanonicalGroundingArtifacts({
   const cappedLimit = Number.isFinite(Number(limit)) ? Math.max(1, Number(limit)) : null;
   const { referenceSeeds, referenceLibrary } = await buildReferenceLibrary({
     providerMode,
-    laws,
-    precedents,
+    lawSearch,
+    precedentSearch,
     saveReferenceLibrary
   });
   const referencesByKey = buildReferenceMap(referenceLibrary);

@@ -10,7 +10,7 @@ assertEqual(formatReferenceSourceMode('live'), '실제 provider', 'live source m
 assertEqual(formatReferenceSourceMode('live_fallback'), 'fixture fallback', 'live fallback source mode');
 assertEqual(formatReferenceSourceMode('fixture'), 'mock fixture', 'fixture source mode');
 assertEqual(formatReferenceSourceMode('mock'), 'mock fixture', 'mock source mode');
-assertEqual(formatReferenceSourceMode('custom_provider'), 'custom_provider', 'unknown source mode');
+assertEqual(formatReferenceSourceMode('custom_provider'), '출처 확인 필요', 'unknown source mode');
 assertEqual(formatReferenceSourceMode(''), '', 'empty source mode');
 
 assertEqual(formatReferenceConfidenceScore(0.73), '73%', 'fraction confidence score');

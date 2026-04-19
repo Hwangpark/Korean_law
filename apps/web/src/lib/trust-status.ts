@@ -41,14 +41,26 @@ export function formatSupportLevel(level: string) {
   return '근거 부족';
 }
 
+export function formatProviderSourceLabel(providerSource: ProviderSource) {
+  if (providerSource === 'live') {
+    return '실제 provider';
+  }
+
+  if (providerSource === 'live_fallback') {
+    return 'fixture fallback';
+  }
+
+  return 'mock fixture';
+}
+
 export function getRuntimeTrustHeadline(trust: RuntimeTrustLike) {
   if (trust.providerSource === 'live') {
-    return '실제 provider 조회 결과';
+    return `${formatProviderSourceLabel(trust.providerSource)} 조회 결과`;
   }
 
   if (trust.providerSource === 'live_fallback') {
-    return 'fixture fallback 결과';
+    return `${formatProviderSourceLabel(trust.providerSource)} 결과`;
   }
 
-  return trust.providerMode === 'live' ? 'fixture 기준 응답' : 'mock fixture 결과';
+  return trust.providerMode === 'live' ? 'fixture 기준 응답' : `${formatProviderSourceLabel('fixture')} 결과`;
 }

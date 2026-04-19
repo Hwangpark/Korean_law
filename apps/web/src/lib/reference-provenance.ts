@@ -1,3 +1,5 @@
+import { formatProviderSourceLabel } from './trust-status';
+
 export function formatReferenceSourceMode(value: unknown) {
   const sourceMode = String(value ?? '').trim().toLowerCase();
 
@@ -5,19 +7,11 @@ export function formatReferenceSourceMode(value: unknown) {
     return '';
   }
 
-  if (sourceMode === 'live') {
-    return '실제 provider';
+  if (sourceMode === 'live' || sourceMode === 'live_fallback' || sourceMode === 'fixture' || sourceMode === 'mock') {
+    return formatProviderSourceLabel(sourceMode === 'mock' ? 'fixture' : sourceMode);
   }
 
-  if (sourceMode === 'live_fallback') {
-    return 'fixture fallback';
-  }
-
-  if (sourceMode === 'fixture' || sourceMode === 'mock') {
-    return 'mock fixture';
-  }
-
-  return sourceMode;
+  return '출처 확인 필요';
 }
 
 export function formatReferenceConfidenceScore(value: unknown) {

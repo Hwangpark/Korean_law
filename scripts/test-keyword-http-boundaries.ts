@@ -453,6 +453,8 @@ function assertPublicBoundary(publicBody: Record<string, unknown>, internal: Key
     },
     "public matched law card should expose a stable provenance summary"
   );
+  assert.equal(matchedLaw.sourceMode, "fixture", "public matched law card should expose safe sourceMode");
+  assert.equal(matchedLaw.provider_source, "fixture", "public matched law card should expose provider_source");
 
   const legalAnalysis = publicBody.legal_analysis as Record<string, unknown>;
   assert.ok(legalAnalysis, "public keyword response should keep legal_analysis");
@@ -572,6 +574,20 @@ function assertSensitiveQueryProvenanceBoundary(internal: KeywordVerificationRes
   const citationRef = ((((publicProjection.legal_analysis as Record<string, unknown>).citation_map as Record<string, unknown>).citations as Array<Record<string, unknown>>)[0]);
   assert.equal((((citationRef.query_refs as Array<Record<string, unknown>>)[0])?.text), "비공개 질의(fact,profile)", "citation_map should redact sensitive query text");
   assert.equal(((citationRef.provenance_summary as Record<string, unknown>)?.redacted_query_count), 1, "citation_map provenance summary should count redactions");
+}
+
+function assertReferenceSeedsInferActualProviderSource(): void {
+  const seeds = buildReferenceSeeds({
+    law_search: {
+      laws: [{ law_name: "형법", article_no: "제307조", content: "허위사실 적시에 대한 기본 조문" }],
+      retrieval_trace: [{ reason: "Returned 1 law matches. provider_source=live_fallback" }]
+    },
+    precedent_search: {
+      precedents: []
+    }
+  }, "live");
+
+  assert.equal(seeds[0]?.sourceMode, "live_fallback", "reference seeds should prefer actual provider_source over requested provider mode");
 }
 
 function assertProfileContextBoundary(internal: KeywordVerificationResponse): void {
@@ -743,6 +759,7 @@ async function main(): Promise<void> {
   assertStoredProjectionSanitizesPreviewBoundary(internal);
   assertStoredProjectionSanitizesTraceBoundary(internal);
   assertSensitiveQueryProvenanceBoundary(internal);
+  assertReferenceSeedsInferActualProviderSource();
   assertProfileContextBoundary(internal);
 
   const handler = createKeywordVerificationHandler(
