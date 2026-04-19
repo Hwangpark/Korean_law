@@ -385,6 +385,69 @@ async function verifyReplayAndCompleteShape(): Promise<void> {
   });
 }
 
+function verifyAgentDoneSanitization(): void {
+  const publicEvent = buildPublicAnalysisEvent({
+    type: "agent_done",
+    agent: "analysis",
+    at: "2026-04-19T04:05:00.000Z",
+    result: {
+      summary: "분석 요약",
+      risk_level: 3,
+      can_sue: true,
+      scope_assessment: {
+        supported_issues: ["명예훼손"],
+        unsupported_issues: ["이혼/가사"],
+        procedural_heavy: false,
+        insufficient_facts: false,
+        unsupported_issue_present: true,
+        warnings: ["지원 범위 밖 쟁점이 섞여 있습니다."]
+      },
+      high_risk_escalation: {
+        triggered: true,
+        emergency: true
+      },
+      facts_snapshot: {
+        parties: ["A", "B"]
+      },
+      decision_axis: {
+        primary_issue: "명예훼손"
+      },
+      citation_map: {
+        citations: [{ citation_id: "c1" }]
+      }
+    }
+  });
+
+  assert.deepEqual(
+    publicEvent,
+    {
+      type: "agent_done",
+      agent: "analysis",
+      at: "2026-04-19T04:05:00.000Z",
+      result: {
+        summary: "분석 요약",
+        risk_level: 3,
+        can_sue: true,
+        scope_assessment: {
+          supported_issues: ["명예훼손"],
+          unsupported_issues: ["이혼/가사"],
+          procedural_heavy: false,
+          insufficient_facts: false,
+          unsupported_issue_present: true,
+          warnings: ["지원 범위 밖 쟁점이 섞여 있습니다."]
+        }
+      }
+    },
+    "agent_done public event should keep only sanitized analysis fields"
+  );
+
+  const result = asRecord(publicEvent.result);
+  assert.equal("high_risk_escalation" in result, false, "agent_done public event must not expose high_risk_escalation");
+  assert.equal("facts_snapshot" in result, false, "agent_done public event must not expose facts_snapshot");
+  assert.equal("decision_axis" in result, false, "agent_done public event must not expose decision_axis");
+  assert.equal("citation_map" in result, false, "agent_done public event must not expose citation_map");
+}
+
 async function verifyReplayErrorShape(): Promise<void> {
   const authConfig = createTestAuthConfig();
   const analysisConfig = createTestAnalysisConfig();
@@ -440,6 +503,7 @@ async function verifyReplayErrorShape(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  verifyAgentDoneSanitization();
   await verifyReplayAndCompleteShape();
   await verifyReplayErrorShape();
   process.stdout.write("Analysis SSE contract checks passed.\n");
