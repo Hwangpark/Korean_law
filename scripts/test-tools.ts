@@ -19,6 +19,10 @@ type ReferenceItem = {
   penalty?: string | null;
   similarityScore?: number | null;
   sourceMode: string;
+  officialSourceLabel?: string | null;
+  authorityTier?: string;
+  referenceDate?: string | null;
+  freshnessStatus?: string;
   keywords: string[];
   caseId: number | null;
   runId: string | null;
@@ -48,6 +52,10 @@ function createReferenceLibraryStub() {
         penalty: seed.penalty,
         similarityScore: seed.similarityScore,
         sourceMode: seed.sourceMode,
+        officialSourceLabel: seed.officialSourceLabel,
+        authorityTier: seed.authorityTier,
+        referenceDate: seed.referenceDate,
+        freshnessStatus: seed.freshnessStatus,
         keywords: seed.keywords,
         caseId: null,
         runId: null,

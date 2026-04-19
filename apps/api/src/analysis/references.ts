@@ -5,6 +5,8 @@ import {
 } from "./reference-keys.mjs";
 
 export type ReferenceKind = "law" | "precedent";
+export type ReferenceAuthorityTier = "statute" | "constitutional_court" | "supreme_court" | "high_court" | "trial_court" | "unknown";
+export type ReferenceFreshnessStatus = "current" | "historical" | "unknown";
 
 export interface ReferenceSeed {
   kind: ReferenceKind;
@@ -21,6 +23,10 @@ export interface ReferenceSeed {
   verdict: string | null;
   penalty: string | null;
   similarityScore: number | null;
+  officialSourceLabel?: string | null;
+  authorityTier?: ReferenceAuthorityTier;
+  referenceDate?: string | null;
+  freshnessStatus?: ReferenceFreshnessStatus;
   keywords: string[];
   payload: Record<string, unknown>;
   searchText: string;
@@ -42,6 +48,10 @@ export interface ReferenceLibraryItem {
   penalty: string | null;
   similarityScore: number | null;
   sourceMode: string;
+  officialSourceLabel?: string | null;
+  authorityTier?: ReferenceAuthorityTier;
+  referenceDate?: string | null;
+  freshnessStatus?: ReferenceFreshnessStatus;
   keywords: string[];
   caseId: string | null;
   runId: string | null;
@@ -131,6 +141,88 @@ function asNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function asDateText(value: unknown): string | null {
+  const normalized = normalizeText(value);
+  return normalized || null;
+}
+
+function inferAuthorityTier(kind: ReferenceKind, court: string | null): ReferenceAuthorityTier {
+  if (kind === "law") {
+    return "statute";
+  }
+
+  const normalizedCourt = normalizeText(court).toLowerCase();
+  if (!normalizedCourt) {
+    return "unknown";
+  }
+  if (normalizedCourt.includes("헌법재판소")) {
+    return "constitutional_court";
+  }
+  if (normalizedCourt.includes("대법원")) {
+    return "supreme_court";
+  }
+  if (normalizedCourt.includes("고등법원") || normalizedCourt.includes("특허법원")) {
+    return "high_court";
+  }
+  if (normalizedCourt.includes("지방법원") || normalizedCourt.includes("가정법원") || normalizedCourt.includes("행정법원") || normalizedCourt.includes("회생법원")) {
+    return "trial_court";
+  }
+  return "unknown";
+}
+
+function inferOfficialSourceLabel(kind: ReferenceKind, payload: Record<string, unknown>, court: string | null): string | null {
+  if (kind === "law") {
+    return normalizeText(
+      payload.ministry_name
+      ?? payload.competent_authority
+      ?? payload.department
+      ?? payload.ministry
+      ?? "법제처 국가법령정보"
+    ) || "법제처 국가법령정보";
+  }
+
+  return normalizeText(court) || "법원 판례";
+}
+
+function inferReferenceDate(kind: ReferenceKind, payload: Record<string, unknown>): string | null {
+  if (kind === "law") {
+    return asDateText(
+      payload.effective_date
+      ?? payload.effectiveDate
+      ?? payload.promulgation_date
+      ?? payload.promulgationDate
+      ?? payload.date
+    );
+  }
+
+  return asDateText(payload.decision_date ?? payload.date ?? payload.sentenced_at);
+}
+
+function inferFreshnessStatus(payload: Record<string, unknown>): ReferenceFreshnessStatus {
+  const status = normalizeText(
+    payload.freshness_status
+    ?? payload.freshnessStatus
+    ?? payload.temporal_status
+    ?? payload.temporalStatus
+    ?? payload.status
+  ).toLowerCase();
+
+  if (["current", "active", "현행"].includes(status)) {
+    return "current";
+  }
+  if (["historical", "repealed", "archived", "과거", "구법"].includes(status)) {
+    return "historical";
+  }
+  if (payload.is_historical === true || payload.isHistorical === true || payload.repealed === true) {
+    return "historical";
+  }
+  if (payload.is_current === true || payload.isCurrent === true) {
+    return "current";
+  }
+
+  return "unknown";
+}
+
 function inferSourceModeFromResult(result: Record<string, unknown>, fallbackSourceMode: string): string {
   const meta = asRecord(result.meta);
   const traceEntries = [
@@ -190,6 +282,10 @@ function buildLawSeed(law: Record<string, unknown>, sourceMode: string): Referen
     verdict: null,
     penalty: penalty || null,
     similarityScore: null,
+    officialSourceLabel: inferOfficialSourceLabel("law", law, null),
+    authorityTier: inferAuthorityTier("law", null),
+    referenceDate: inferReferenceDate("law", law),
+    freshnessStatus: inferFreshnessStatus(law),
     keywords: collectKeywords(lawName, articleNo, articleTitle, content, penalty, topics, queries),
     payload: law,
     searchText: buildSearchText(
@@ -238,6 +334,10 @@ function buildPrecedentSeed(precedent: Record<string, unknown>, sourceMode: stri
     verdict: verdict || null,
     penalty: sentence || null,
     similarityScore,
+    officialSourceLabel: inferOfficialSourceLabel("precedent", precedent, normalizedCourt || null),
+    authorityTier: inferAuthorityTier("precedent", normalizedCourt || null),
+    referenceDate: inferReferenceDate("precedent", precedent),
+    freshnessStatus: inferFreshnessStatus(precedent),
     keywords: collectKeywords(caseNo, court, date, summary, verdict, sentence, reasoning, topics),
     payload: precedent,
     searchText: buildSearchText(
@@ -289,6 +389,10 @@ export function materializeReferenceSeed(
     penalty: seed.penalty,
     similarityScore: seed.similarityScore,
     sourceMode: seed.sourceMode,
+    officialSourceLabel: seed.officialSourceLabel ?? null,
+    authorityTier: seed.authorityTier ?? "unknown",
+    referenceDate: seed.referenceDate ?? null,
+    freshnessStatus: seed.freshnessStatus ?? "unknown",
     keywords: seed.keywords,
     caseId: options.caseId ?? null,
     runId: options.runId ?? null,
@@ -298,6 +402,7 @@ export function materializeReferenceSeed(
 }
 
 export function mapReferenceRow(row: ReferenceRow): ReferenceLibraryItem {
+  const payload = row.payload_json ?? {};
   return {
     id: row.source_key,
     kind: row.kind,
@@ -314,6 +419,10 @@ export function mapReferenceRow(row: ReferenceRow): ReferenceLibraryItem {
     penalty: row.penalty,
     similarityScore: asNumber(row.similarity_score),
     sourceMode: row.source_mode,
+    officialSourceLabel: inferOfficialSourceLabel(row.kind, payload, row.court),
+    authorityTier: inferAuthorityTier(row.kind, row.court),
+    referenceDate: inferReferenceDate(row.kind, payload),
+    freshnessStatus: inferFreshnessStatus(payload),
     keywords: toStringArray(row.keywords),
     caseId: row.case_id,
     runId: row.run_id,

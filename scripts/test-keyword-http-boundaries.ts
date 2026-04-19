@@ -109,6 +109,10 @@ function createAnalysisStoreStub(): AnalysisStore {
         penalty: seed.penalty,
         similarityScore: seed.similarityScore,
         sourceMode: seed.sourceMode,
+        officialSourceLabel: seed.officialSourceLabel,
+        authorityTier: seed.authorityTier,
+        referenceDate: seed.referenceDate,
+        freshnessStatus: seed.freshnessStatus,
         keywords: seed.keywords,
         caseId: null,
         runId: null,
@@ -461,6 +465,9 @@ function assertPublicBoundary(publicBody: Record<string, unknown>, internal: Key
   );
   assert.equal(matchedLaw.sourceMode, "fixture", "public matched law card should expose safe sourceMode");
   assert.equal(matchedLaw.provider_source, "fixture", "public matched law card should expose provider_source");
+  assert.equal(matchedLaw.official_source_label, "법제처 국가법령정보", "public matched law should expose safe official source label");
+  assert.equal(matchedLaw.authority_tier, "statute", "public matched law should expose safe authority tier");
+  assert.equal(matchedLaw.freshness_status, "unknown", "public matched law should default freshness to unknown when no upstream status exists");
 
   const lawSource = matchedLaw.source as Record<string, unknown>;
   assert.deepEqual(
@@ -495,6 +502,10 @@ function assertPublicBoundary(publicBody: Record<string, unknown>, internal: Key
   assert.match(String(matchedPrecedent.subtitle), /\d{4}-\d{2}-\d{2}/, "public matched precedent subtitle should preserve precedent date metadata");
   assert.equal(matchedPrecedent.provider_source, internalPrecedent.reference.sourceMode, "public matched precedent should expose safe provider source");
   assert.equal(matchedPrecedent.sourceMode, internalPrecedent.reference.sourceMode, "public matched precedent should expose safe sourceMode");
+  assert.equal(matchedPrecedent.official_source_label, internalPrecedent.reference.officialSourceLabel ?? internalPrecedent.reference.court ?? "법원 판례", "public matched precedent should expose safe official source label");
+  assert.equal(matchedPrecedent.authority_tier, internalPrecedent.reference.authorityTier ?? "unknown", "public matched precedent should expose derived authority tier");
+  assert.equal(matchedPrecedent.reference_date, internalPrecedent.reference.referenceDate ?? "", "public matched precedent should expose safe decision date metadata");
+  assert.equal(matchedPrecedent.freshness_status, internalPrecedent.reference.freshnessStatus ?? "unknown", "public matched precedent should default freshness to unknown without explicit upstream status");
 
   const precedentSource = matchedPrecedent.source as Record<string, unknown>;
   assert.deepEqual(

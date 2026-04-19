@@ -204,6 +204,10 @@ function sanitizePublicReferenceCard(card: VerifiedReferenceCard): Record<string
       providerSource,
       provider_source: providerSource
     } : {}),
+    official_source_label: sanitizeString(card.reference?.officialSourceLabel),
+    authority_tier: sanitizeString(card.reference?.authorityTier),
+    reference_date: sanitizeString(card.reference?.referenceDate),
+    freshness_status: sanitizeString(card.reference?.freshnessStatus, "unknown"),
     source: {
       law_name: sanitizeString(card.source?.law_name),
       article_no: sanitizeString(card.source?.article_no),
