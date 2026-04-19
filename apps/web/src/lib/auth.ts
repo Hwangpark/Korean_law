@@ -139,6 +139,10 @@ export type AnalysisLegalResult = {
   can_sue?: boolean;
   risk_level?: number;
   summary?: string;
+  review_recommendation?: {
+    handoff_recommended?: boolean;
+    uncertainty_reasons?: string[];
+  };
   charges?: Array<Record<string, unknown> & {
     charge?: string;
     basis?: string;

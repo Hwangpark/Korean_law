@@ -159,6 +159,11 @@ type RuntimeTrustInfo = {
   notice: string;
 };
 
+type ReviewRecommendation = {
+  handoffRecommended: boolean;
+  uncertaintyReasons: string[];
+};
+
 type AnalysisResult = {
   runtimeTrust?: RuntimeTrustInfo | null;
   can_sue: boolean;
@@ -168,6 +173,7 @@ type AnalysisResult = {
   fact_sheet?: FactSheet | null;
   claim_support?: ClaimSupport | null;
   verifier?: VerifierSummary | null;
+  review_recommendation?: ReviewRecommendation | null;
   charges: Charge[];
   recommended_actions: string[];
   evidence_to_collect: string[];
@@ -1043,12 +1049,30 @@ function normalizeVerifier(value: unknown): VerifierSummary | null {
   return verifier;
 }
 
+function normalizeReviewRecommendation(value: unknown): ReviewRecommendation | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const reviewRecommendation: ReviewRecommendation = {
+    handoffRecommended: Boolean(value.handoff_recommended),
+    uncertaintyReasons: toTextList(value.uncertainty_reasons),
+  };
+
+  if (!reviewRecommendation.handoffRecommended && reviewRecommendation.uncertaintyReasons.length === 0) {
+    return null;
+  }
+
+  return reviewRecommendation;
+}
+
 function buildTrustDetail(result: AnalysisResult): DetailPanelData {
   const factHighlights = [
     ...(result.fact_sheet?.keyPoints ?? []),
     ...(result.fact_sheet?.recommendedFocus ?? []),
     ...(result.fact_sheet?.missingPoints ?? []).map((item) => `보강 필요: ${item}`),
     ...(result.fact_sheet?.unsupportedPoints ?? []).map((item) => `미확인: ${item}`),
+    ...(result.review_recommendation?.uncertaintyReasons ?? []).map((item) => `검토 필요: ${item}`),
     ...(result.verifier?.warnings ?? []).map((item) => `주의: ${item}`),
   ].slice(0, 12);
 
@@ -1136,6 +1160,7 @@ function normalizeAnalysisResult(
     fact_sheet: normalizeFactSheet(result.fact_sheet),
     claim_support: normalizeClaimSupport(result.claim_support),
     verifier: normalizeVerifier(result.verifier),
+    review_recommendation: normalizeReviewRecommendation((result as Record<string, unknown>).review_recommendation),
     profile_guidance: normalizeProfileGuidance(
       result.profile_guidance ?? result.profile_context ?? result.user_profile,
     ),
@@ -3221,7 +3246,7 @@ export default function App() {
         </div>
 
         <div className="results-col results-col-side">
-          {(result.fact_sheet || result.claim_support || result.verifier) && (
+          {(result.fact_sheet || result.claim_support || result.verifier || result.review_recommendation) && (
             <section className="result-section trust-panel-section">
               <div className="trust-panel-head">
                 <div>
@@ -3291,6 +3316,23 @@ export default function App() {
                       </div>
                     )}
                   </div>
+                </div>
+              )}
+
+              {result.review_recommendation && (
+                <div className="trust-panel-card">
+                  <div className="trust-panel-status-row">
+                    <span className={`trust-status-pill ${result.review_recommendation.handoffRecommended ? 'trust-status-warning' : 'trust-status-passed'}`}>
+                      {result.review_recommendation.handoffRecommended ? '전문가 검토 권장' : '일반 검토 안내'}
+                    </span>
+                  </div>
+                  {result.review_recommendation.uncertaintyReasons.length > 0 && (
+                    <div className="trust-warning-list">
+                      {result.review_recommendation.uncertaintyReasons.slice(0, 3).map((reason) => (
+                        <div key={reason} className="trust-warning-item">{reason}</div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 

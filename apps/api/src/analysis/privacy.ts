@@ -460,6 +460,44 @@ function sanitizeGroundingEvidenceSummary(value: unknown): Record<string, unknow
   };
 }
 
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function buildReviewRecommendation(record: Record<string, unknown>): Record<string, unknown> {
+  const verifier = sanitizeVerifier(record.verifier);
+  const safetyGate = sanitizeSafetyGate(record.safety_gate);
+  const scopeAssessment = sanitizeScopeAssessment(record.scope_assessment);
+  const highRiskEscalation = asRecord(record.high_risk_escalation);
+  const riskLevel = asNumber(record.risk_level, 0);
+  const confidenceLabel = asString(asRecord(verifier.confidence_calibration).label);
+  const handoffRecommended =
+    riskLevel >= 4
+    || asBoolean(highRiskEscalation.triggered)
+    || scopeAssessment.procedural_heavy === true
+    || scopeAssessment.insufficient_facts === true
+    || scopeAssessment.unsupported_issue_present === true
+    || safetyGate.adjusted_output === true
+    || verifier.status === "needs_caution"
+    || confidenceLabel === "low";
+
+  const uncertaintyReasons = uniqueStrings([
+    ...(scopeAssessment.insufficient_facts ? ["사실관계가 더 필요해 추가 검토가 안전합니다."] : []),
+    ...(scopeAssessment.procedural_heavy ? ["절차 중심 사안이라 개별 대응은 전문가 검토가 안전합니다."] : []),
+    ...(scopeAssessment.unsupported_issue_present ? ["지원 범위를 벗어난 쟁점이 섞여 있어 단정적 안내를 피해야 합니다."] : []),
+    ...(riskLevel >= 4 ? ["고위험 사안일 수 있어 변호사 상담 필요성을 함께 검토하는 편이 안전합니다."] : []),
+    ...(asBoolean(highRiskEscalation.triggered) ? ["긴급성 또는 고위험 신호가 감지되어 일반 안내만으로는 부족할 수 있습니다."] : []),
+    ...(confidenceLabel === "low" ? ["현재 근거 신뢰도가 낮아 추가 검토가 필요합니다."] : []),
+    ...sanitizeStringArray(safetyGate.warnings),
+    ...sanitizeStringArray(verifier.warnings)
+  ]).slice(0, 4);
+
+  return {
+    handoff_recommended: handoffRecommended,
+    uncertainty_reasons: uncertaintyReasons
+  };
+}
+
 function sanitizeCitationMap(value: unknown): Record<string, unknown> | null {
   const record = asRecord(value);
   const citations = Array.isArray(record.citations)
@@ -526,6 +564,7 @@ function sanitizePublicLegalAnalysis(value: unknown): Record<string, unknown> {
     claim_support: sanitizeClaimSupport(record.claim_support),
     verifier: sanitizeVerifier(record.verifier),
     safety_gate: sanitizeSafetyGate(record.safety_gate),
+    review_recommendation: buildReviewRecommendation(record),
     grounding_evidence: sanitizeGroundingEvidenceSummary(record.grounding_evidence),
     selected_reference_ids: sanitizeStringArray(record.selected_reference_ids),
     citation_map: sanitizeCitationMap(record.citation_map),
@@ -549,6 +588,7 @@ function sanitizeStoredLegalAnalysis(value: unknown): Record<string, unknown> {
     claim_support: publicShape.claim_support,
     verifier: publicShape.verifier,
     safety_gate: publicShape.safety_gate,
+    review_recommendation: publicShape.review_recommendation,
     grounding_evidence: publicShape.grounding_evidence,
     selected_reference_ids: publicShape.selected_reference_ids,
     share_text: publicShape.share_text

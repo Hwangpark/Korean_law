@@ -1009,6 +1009,14 @@ async function main() {
     },
     "stored analysis payload should retain a stable safety gate contract even when absent"
   );
+  assert.deepEqual(
+    stored.legal_analysis?.review_recommendation,
+    {
+      handoff_recommended: false,
+      uncertainty_reasons: []
+    },
+    "stored analysis payload should retain a stable review recommendation contract even when absent"
+  );
   assert.equal("ocr" in stored, false, "stored analysis payload must exclude raw OCR content");
   assert.deepEqual(
     stored.legal_analysis?.grounding_evidence,
@@ -1298,6 +1306,14 @@ async function main() {
       warnings: []
     },
     "public analysis response should expose sanitized safety gate metadata"
+  );
+  assert.deepEqual(
+    publicResult.legal_analysis?.review_recommendation,
+    {
+      handoff_recommended: false,
+      uncertainty_reasons: ["careful"]
+    },
+    "public analysis response should expose derived review recommendation metadata"
   );
   assert.deepEqual(
     publicResult.legal_analysis?.grounding_evidence,
