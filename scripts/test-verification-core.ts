@@ -131,6 +131,53 @@ function buildPrecedentRecord(params: {
   };
 }
 
+function buildPrecedentReference(params: {
+  caseNo: string;
+  court: string;
+  date?: string;
+}): ReferenceLibraryItem {
+  const id = `precedent::${params.caseNo}`;
+  const date = params.date ?? "2026. 4. 1.";
+
+  return {
+    ...buildReference(id, "precedent"),
+    id,
+    title: params.caseNo,
+    subtitle: `${params.court} ${date}`,
+    caseNo: params.caseNo,
+    court: params.court
+  };
+}
+
+function buildRankedPrecedentCards(
+  plan: KeywordQueryPlan,
+  inputs: Array<{
+    caseNo: string;
+    court: string;
+    summary: string;
+    similarityScore: number;
+  }>
+): VerifiedReferenceCard[] {
+  const references = inputs.map((input) => buildPrecedentReference(input));
+  const referenceByCaseNo = new Map(references.map((reference) => [reference.caseNo, reference]));
+  const records = inputs.map((input) => {
+    const reference = referenceByCaseNo.get(input.caseNo);
+    if (!reference) {
+      throw new Error(`missing test reference for precedent ${input.caseNo}`);
+    }
+    return buildPrecedentRecord({
+      ...input,
+      referenceKey: reference.id
+    });
+  });
+
+  return buildPrecedentVerificationCards(
+    plan,
+    records,
+    new Map(references.map((reference) => [reference.id, reference]))
+  );
+}
+
 function buildPlan(candidateIssues: CandidateIssue[]): KeywordQueryPlan {
   return {
     originalQuery: "카카오톡 단톡방에 허위사실을 올렸어요",
@@ -154,6 +201,58 @@ function buildPlan(candidateIssues: CandidateIssue[]): KeywordQueryPlan {
       unsupportedIssuePresent: false
     }
   };
+}
+
+function assertPrecedentAuthorityRankingSemantics(plan: KeywordQueryPlan): void {
+  const commonSummary = "카카오톡 단톡방 허위사실 적시와 공연성이 함께 문제 된 사례";
+  const authorityRankedPrecedents = buildRankedPrecedentCards(plan, [
+    {
+      caseNo: "2026나12345",
+      court: "서울중앙지방법원",
+      summary: commonSummary,
+      similarityScore: 0.88
+    },
+    {
+      caseNo: "2026노22222",
+      court: "서울고등법원",
+      summary: commonSummary,
+      similarityScore: 0.84
+    },
+    {
+      caseNo: "2026도54321",
+      court: "대법원",
+      summary: commonSummary,
+      similarityScore: 0.8
+    }
+  ]);
+
+  const authorityOrder = authorityRankedPrecedents.map((card) => card.source.court);
+  if (JSON.stringify(authorityOrder) !== JSON.stringify(["대법원", "서울고등법원", "서울중앙지방법원"])) {
+    throw new Error(
+      `precedent ranking should prefer stronger court authority when relevance is close; got ${authorityOrder.join(", ")}.`
+    );
+  }
+
+  const relevanceDominantPrecedents = buildRankedPrecedentCards(plan, [
+    {
+      caseNo: "2026나99999",
+      court: "서울중앙지방법원",
+      summary: commonSummary,
+      similarityScore: 0.98
+    },
+    {
+      caseNo: "2026도11111",
+      court: "대법원",
+      summary: commonSummary,
+      similarityScore: 0.38
+    }
+  ]);
+
+  if (relevanceDominantPrecedents[0]?.source.court !== "서울중앙지방법원") {
+    throw new Error(
+      "precedent ranking should not blindly promote high-authority courts over a much stronger relevance match."
+    );
+  }
 }
 
 async function main(): Promise<void> {
@@ -314,49 +413,7 @@ async function main(): Promise<void> {
     throw new Error("analysis payload must build shared guidance items.");
   }
 
-  const supremeReference = {
-    ...buildReference("precedent::2026다54321", "precedent"),
-    id: "precedent::2026다54321",
-    title: "2026다54321",
-    subtitle: "대법원 2026. 5. 1.",
-    caseNo: "2026다54321",
-    court: "대법원"
-  };
-  const districtReference = {
-    ...buildReference("precedent::2026나12345", "precedent"),
-    id: "precedent::2026나12345",
-    title: "2026나12345",
-    subtitle: "서울중앙지방법원 2026. 5. 1.",
-    caseNo: "2026나12345",
-    court: "서울중앙지방법원"
-  };
-  const authorityRankedPrecedents = buildPrecedentVerificationCards(
-    plan,
-    [
-      buildPrecedentRecord({
-        caseNo: "2026나12345",
-        court: "서울중앙지방법원",
-        summary: "카카오톡 단톡방 허위사실 적시가 쟁점인 하급심 사례",
-        similarityScore: 0.82,
-        referenceKey: districtReference.id
-      }),
-      buildPrecedentRecord({
-        caseNo: "2026다54321",
-        court: "대법원",
-        summary: "카카오톡 단톡방 허위사실 적시와 공연성이 문제 된 대법원 사례",
-        similarityScore: 0.76,
-        referenceKey: supremeReference.id
-      })
-    ],
-    new Map([
-      [districtReference.id, districtReference],
-      [supremeReference.id, supremeReference]
-    ])
-  );
-
-  if (authorityRankedPrecedents[0]?.source.court !== "대법원") {
-    throw new Error("precedent ranking should prefer stronger court authority when relevance is similar.");
-  }
+  assertPrecedentAuthorityRankingSemantics(plan);
 
   process.stdout.write("Verification core checks passed.\n");
 }
