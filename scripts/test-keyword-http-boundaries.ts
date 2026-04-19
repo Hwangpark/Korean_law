@@ -433,8 +433,14 @@ function assertPublicBoundary(publicBody: Record<string, unknown>, internal: Key
   const matchedLaw = Array.isArray(publicBody.matched_laws)
     ? publicBody.matched_laws[0] as Record<string, unknown>
     : null;
+  const internalLaw = internal.matched_laws[0];
   assert.ok(matchedLaw, "public keyword response should keep matched law cards");
+  assert.ok(internalLaw, "regression fixture should include at least one matched law");
   assert.equal("reference" in matchedLaw, false, "matched law card must not embed ReferenceLibraryItem");
+  assert.equal("createdAt" in matchedLaw, false, "matched law card must not expose storage freshness timestamps");
+  assert.equal("updatedAt" in matchedLaw, false, "matched law card must not expose storage freshness timestamps");
+  assert.equal(matchedLaw.referenceKey, internalLaw.referenceKey, "public matched law should retain stable reference key");
+  assert.equal(matchedLaw.subtitle, internalLaw.subtitle, "public matched law should retain article-bearing subtitle authority metadata");
   assert.ok(Array.isArray(matchedLaw.matchedQueries), "matched law card should keep legacy matchedQueries text list");
   assert.ok(Array.isArray(matchedLaw.matchedQueryRefs), "matched law card should expose structured matchedQueryRefs");
   assert.ok((matchedLaw.matchedQueryRefs as Array<unknown>).length > 0, "matched law card should expose at least one matched query ref");
@@ -455,6 +461,25 @@ function assertPublicBoundary(publicBody: Record<string, unknown>, internal: Key
   );
   assert.equal(matchedLaw.sourceMode, "fixture", "public matched law card should expose safe sourceMode");
   assert.equal(matchedLaw.provider_source, "fixture", "public matched law card should expose provider_source");
+
+  const lawSource = matchedLaw.source as Record<string, unknown>;
+  assert.deepEqual(
+    {
+      law_name: lawSource.law_name,
+      article_no: lawSource.article_no,
+      article_title: lawSource.article_title,
+      penalty: lawSource.penalty,
+      url: lawSource.url
+    },
+    {
+      law_name: internalLaw.source.law_name ?? "",
+      article_no: internalLaw.source.article_no ?? "",
+      article_title: internalLaw.source.article_title ?? "",
+      penalty: internalLaw.source.penalty ?? "",
+      url: internalLaw.source.url ?? ""
+    },
+    "public matched law should retain authority metadata needed to identify the controlling statute"
+  );
 
   const matchedPrecedent = Array.isArray(publicBody.matched_precedents)
     ? publicBody.matched_precedents[0] as Record<string, unknown>
