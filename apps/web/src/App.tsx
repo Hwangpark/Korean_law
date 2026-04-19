@@ -1755,6 +1755,17 @@ export default function App() {
         unsupportedPointCount: result.fact_sheet?.unsupportedPoints.length,
       })
     : null;
+  const keywordAuthoritySignal = keywordResult
+    ? getAuthoritySignal({
+        handoffRecommended: keywordResult.review_recommendation?.handoffRecommended,
+        abstainReasons: keywordResult.review_recommendation?.abstainReasons,
+        uncertaintyReasons: keywordResult.review_recommendation?.uncertaintyReasons,
+        evidenceSufficient: keywordResult.verifier?.evidenceSufficient,
+        claimSupportOverall: keywordResult.claim_support?.overall,
+        missingPointCount: keywordResult.fact_sheet?.missingPoints.length,
+        unsupportedPointCount: keywordResult.fact_sheet?.unsupportedPoints.length,
+      })
+    : null;
   const claimSupportPreview = result?.claim_support?.entries.slice(0, 4) ?? [];
 
   function closeAnalysisStream() {
@@ -2736,6 +2747,24 @@ export default function App() {
                   {keywordResult.fact_sheet?.missingPoints.length ? (
                     <span className="provenance-chip provenance-chip-soft trust-chip-missing">빠진 사실 {keywordResult.fact_sheet.missingPoints.length}개</span>
                   ) : null}
+                </div>
+              )}
+              {keywordAuthoritySignal && keywordAuthoritySignal.level !== 'review_ready' && (
+                <div className={`trust-panel-card authority-signal-card authority-signal-${keywordAuthoritySignal.level}`}>
+                  <div className="trust-panel-status-row">
+                    <span className={`trust-status-pill trust-status-${keywordAuthoritySignal.level}`}>{keywordAuthoritySignal.label}</span>
+                  </div>
+                  <div className="authority-signal-copy">
+                    <strong>{keywordAuthoritySignal.headline}</strong>
+                    <p>{keywordAuthoritySignal.description}</p>
+                  </div>
+                  {keywordAuthoritySignal.reasons.length > 0 && (
+                    <div className="trust-warning-list">
+                      {keywordAuthoritySignal.reasons.slice(0, 3).map((reason) => (
+                        <div key={reason} className="trust-warning-item">{reason}</div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
