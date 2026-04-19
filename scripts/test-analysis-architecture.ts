@@ -1390,6 +1390,148 @@ async function main() {
     "public analysis response should explain why abstained answers were limited"
   );
 
+  const highRiskStored = buildStoredAnalysisResult({
+    meta: {
+      provider_mode: "mock",
+      generated_at: "2026-04-14T00:00:00.000Z",
+      input_type: "text",
+      context_type: "community"
+    },
+    legal_analysis: {
+      can_sue: true,
+      risk_level: 5,
+      summary: "긴급 위험이 의심됩니다.",
+      verifier: {
+        stage: "pre_analysis_verifier",
+        status: "passed",
+        evidence_sufficient: true,
+        citation_integrity: true,
+        contradiction_detected: false,
+        selected_reference_count: 2,
+        issue_count: 1,
+        confidence_calibration: {
+          score: 0.84,
+          label: "high"
+        },
+        warnings: []
+      },
+      safety_gate: {
+        stage: "pre_output_safety_gate",
+        status: "adjusted",
+        adjusted_output: true,
+        blocked_reasons: ["stalking_escalation"],
+        warnings: []
+      },
+      high_risk_escalation: {
+        triggered: true,
+        emergency: true,
+        triggers: ["stalking_escalation"],
+        warnings: ["반복 접근 또는 스토킹 위험이 보여 빠른 신고 검토가 필요합니다."],
+        immediate_actions: ["접근, 미행, 주거지 주변 대기가 이어지면 차단만 하지 말고 시간순 기록과 함께 112 신고 여부를 바로 검토하세요."],
+        evidence_actions: []
+      },
+      scope_assessment: {
+        supported_issues: ["스토킹"],
+        unsupported_issues: [],
+        procedural_heavy: false,
+        insufficient_facts: false,
+        unsupported_issue_present: false,
+        warnings: []
+      }
+    }
+  });
+
+  assert.deepEqual(
+    highRiskStored.legal_analysis?.review_recommendation,
+    {
+      handoff_recommended: true,
+      abstain_reasons: ["긴급 또는 고위험 신호가 있어 법률 판단보다 안전 확보와 증거 보존을 우선했습니다."],
+      uncertainty_reasons: [
+        "고위험 사안일 수 있어 변호사 상담 필요성을 함께 검토하는 편이 안전합니다.",
+        "긴급성 또는 고위험 신호가 감지되어 일반 안내만으로는 부족할 수 있습니다."
+      ]
+    },
+    "stored analysis payload should preserve high-risk handoff guidance without leaking raw escalation internals"
+  );
+  assert.equal(
+    "high_risk_escalation" in (highRiskStored.legal_analysis ?? {}),
+    false,
+    "stored analysis payload must not expose raw high-risk escalation internals"
+  );
+
+  const highRiskPublic = buildPublicAnalysisResult(
+    "job-high-risk-test",
+    {
+      meta: {
+        provider_mode: "mock",
+        generated_at: "2026-04-14T00:00:00.000Z",
+        input_type: "text",
+        context_type: "community"
+      },
+      legal_analysis: {
+        can_sue: true,
+        risk_level: 5,
+        summary: "긴급 위험이 의심됩니다.",
+        verifier: {
+          stage: "pre_analysis_verifier",
+          status: "passed",
+          evidence_sufficient: true,
+          citation_integrity: true,
+          contradiction_detected: false,
+          selected_reference_count: 2,
+          issue_count: 1,
+          confidence_calibration: {
+            score: 0.84,
+            label: "high"
+          },
+          warnings: []
+        },
+        safety_gate: {
+          stage: "pre_output_safety_gate",
+          status: "adjusted",
+          adjusted_output: true,
+          blocked_reasons: ["stalking_escalation"],
+          warnings: []
+        },
+        high_risk_escalation: {
+          triggered: true,
+          emergency: true,
+          triggers: ["stalking_escalation"],
+          warnings: ["반복 접근 또는 스토킹 위험이 보여 빠른 신고 검토가 필요합니다."],
+          immediate_actions: ["접근, 미행, 주거지 주변 대기가 이어지면 차단만 하지 말고 시간순 기록과 함께 112 신고 여부를 바로 검토하세요."],
+          evidence_actions: []
+        },
+        scope_assessment: {
+          supported_issues: ["스토킹"],
+          unsupported_issues: [],
+          procedural_heavy: false,
+          insufficient_facts: false,
+          unsupported_issue_present: false,
+          warnings: []
+        }
+      }
+    },
+    []
+  );
+
+  assert.deepEqual(
+    highRiskPublic.legal_analysis?.review_recommendation,
+    {
+      handoff_recommended: true,
+      abstain_reasons: ["긴급 또는 고위험 신호가 있어 법률 판단보다 안전 확보와 증거 보존을 우선했습니다."],
+      uncertainty_reasons: [
+        "고위험 사안일 수 있어 변호사 상담 필요성을 함께 검토하는 편이 안전합니다.",
+        "긴급성 또는 고위험 신호가 감지되어 일반 안내만으로는 부족할 수 있습니다."
+      ]
+    },
+    "public analysis response should preserve high-risk handoff guidance without leaking raw escalation internals"
+  );
+  assert.equal(
+    "high_risk_escalation" in (highRiskPublic.legal_analysis ?? {}),
+    false,
+    "public analysis payload must not expose raw high-risk escalation internals"
+  );
+
   assert.deepEqual(
     publicResult.legal_analysis?.grounding_evidence,
     {
