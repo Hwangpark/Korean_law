@@ -161,6 +161,7 @@ type RuntimeTrustInfo = {
 
 type ReviewRecommendation = {
   handoffRecommended: boolean;
+  abstainReasons: string[];
   uncertaintyReasons: string[];
 };
 
@@ -1056,10 +1057,11 @@ function normalizeReviewRecommendation(value: unknown): ReviewRecommendation | n
 
   const reviewRecommendation: ReviewRecommendation = {
     handoffRecommended: Boolean(value.handoff_recommended),
+    abstainReasons: toTextList(value.abstain_reasons),
     uncertaintyReasons: toTextList(value.uncertainty_reasons),
   };
 
-  if (!reviewRecommendation.handoffRecommended && reviewRecommendation.uncertaintyReasons.length === 0) {
+  if (!reviewRecommendation.handoffRecommended && reviewRecommendation.abstainReasons.length === 0 && reviewRecommendation.uncertaintyReasons.length === 0) {
     return null;
   }
 
@@ -1072,6 +1074,7 @@ function buildTrustDetail(result: AnalysisResult): DetailPanelData {
     ...(result.fact_sheet?.recommendedFocus ?? []),
     ...(result.fact_sheet?.missingPoints ?? []).map((item) => `보강 필요: ${item}`),
     ...(result.fact_sheet?.unsupportedPoints ?? []).map((item) => `미확인: ${item}`),
+    ...(result.review_recommendation?.abstainReasons ?? []).map((item) => `판단 보류: ${item}`),
     ...(result.review_recommendation?.uncertaintyReasons ?? []).map((item) => `검토 필요: ${item}`),
     ...(result.verifier?.warnings ?? []).map((item) => `주의: ${item}`),
   ].slice(0, 12);
@@ -3326,9 +3329,12 @@ export default function App() {
                       {result.review_recommendation.handoffRecommended ? '전문가 검토 권장' : '일반 검토 안내'}
                     </span>
                   </div>
-                  {result.review_recommendation.uncertaintyReasons.length > 0 && (
+                  {(result.review_recommendation.abstainReasons.length > 0 || result.review_recommendation.uncertaintyReasons.length > 0) && (
                     <div className="trust-warning-list">
-                      {result.review_recommendation.uncertaintyReasons.slice(0, 3).map((reason) => (
+                      {(result.review_recommendation.abstainReasons.length > 0
+                        ? result.review_recommendation.abstainReasons
+                        : result.review_recommendation.uncertaintyReasons
+                      ).slice(0, 3).map((reason) => (
                         <div key={reason} className="trust-warning-item">{reason}</div>
                       ))}
                     </div>

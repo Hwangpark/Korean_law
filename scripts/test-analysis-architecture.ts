@@ -1013,6 +1013,7 @@ async function main() {
     stored.legal_analysis?.review_recommendation,
     {
       handoff_recommended: false,
+      abstain_reasons: [],
       uncertainty_reasons: []
     },
     "stored analysis payload should retain a stable review recommendation contract even when absent"
@@ -1311,10 +1312,84 @@ async function main() {
     publicResult.legal_analysis?.review_recommendation,
     {
       handoff_recommended: false,
+      abstain_reasons: [],
       uncertainty_reasons: ["careful"]
     },
     "public analysis response should expose derived review recommendation metadata"
   );
+
+  const abstainingPublicResult = buildPublicAnalysisResult(
+    "job-abstain-test",
+    {
+      meta: {
+        provider_mode: "mock",
+        generated_at: "2026-04-14T00:00:00.000Z",
+        input_type: "text",
+        context_type: "community"
+      },
+      legal_analysis: {
+        can_sue: false,
+        risk_level: 2,
+        summary: "보수적으로 제한된 답변",
+        claim_support: {
+          overall: "missing",
+          direct_count: 0,
+          partial_count: 0,
+          missing_count: 1,
+          entries: []
+        },
+        verifier: {
+          stage: "pre_analysis_verifier",
+          status: "needs_caution",
+          evidence_sufficient: false,
+          citation_integrity: false,
+          contradiction_detected: false,
+          selected_reference_count: 0,
+          issue_count: 1,
+          confidence_calibration: {
+            score: 0.34,
+            label: "low"
+          },
+          warnings: []
+        },
+        safety_gate: {
+          stage: "pre_output_safety_gate",
+          status: "adjusted",
+          adjusted_output: true,
+          blocked_reasons: ["insufficient_grounding", "citation_integrity"],
+          warnings: []
+        },
+        scope_assessment: {
+          supported_issues: ["명예훼손"],
+          unsupported_issues: [],
+          procedural_heavy: false,
+          insufficient_facts: true,
+          unsupported_issue_present: false,
+          warnings: []
+        }
+      }
+    },
+    []
+  );
+
+  assert.deepEqual(
+    abstainingPublicResult.legal_analysis?.review_recommendation,
+    {
+      handoff_recommended: true,
+      abstain_reasons: [
+        "핵심 사실이 더 필요해 확정 판단을 보류했습니다.",
+        "직접 연결된 법령·판례 인용이 완전하지 않아 단정 결론을 피했습니다.",
+        "최종 판단 문장에 직접 연결된 근거가 부족해 보수적으로 답했습니다.",
+        "현재 근거 신뢰도가 낮아 참고용 안내로 제한했습니다."
+      ],
+      uncertainty_reasons: [
+        "사실관계가 더 필요해 추가 검토가 안전합니다.",
+        "현재 근거 신뢰도가 낮아 추가 검토가 필요합니다."
+      ]
+    },
+    "public analysis response should explain why abstained answers were limited"
+  );
+
   assert.deepEqual(
     publicResult.legal_analysis?.grounding_evidence,
     {

@@ -68,6 +68,71 @@ function confidenceToProbability(score: number): "high" | "medium" | "low" {
   return "low";
 }
 
+function uniqueStrings(values: Array<string | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))];
+}
+
+function buildReviewRecommendation(
+  legalAnalysis: KeywordVerificationResponse["legal_analysis"]
+): NonNullable<KeywordVerificationResponse["legal_analysis"]["review_recommendation"]> {
+  const safetyGate = legalAnalysis.safety_gate;
+  const verifier = legalAnalysis.verifier;
+  const claimSupport = legalAnalysis.claim_support;
+  const scopeAssessment = legalAnalysis.scope_assessment;
+  const confidenceLabel = verifier?.confidence_calibration?.label ?? "";
+  const handoffRecommended =
+    Number(legalAnalysis.risk_level ?? 0) >= 4
+    || Boolean(scopeAssessment?.procedural_heavy)
+    || Boolean(scopeAssessment?.insufficient_facts)
+    || Boolean(scopeAssessment?.unsupported_issue_present)
+    || Boolean(safetyGate?.adjusted_output)
+    || verifier?.status === "needs_caution"
+    || confidenceLabel === "low";
+
+  const abstainReasons = uniqueStrings([
+    ((!legalAnalysis.can_sue || safetyGate?.adjusted_output) && scopeAssessment?.insufficient_facts)
+      ? "핵심 사실이 더 필요해 확정 판단을 보류했습니다."
+      : undefined,
+    ((!legalAnalysis.can_sue || safetyGate?.adjusted_output) && scopeAssessment?.procedural_heavy)
+      ? "절차 중심 사안이라 개별 사실판단보다 절차 확인과 전문가 검토를 우선했습니다."
+      : undefined,
+    ((!legalAnalysis.can_sue || safetyGate?.adjusted_output) && scopeAssessment?.unsupported_issue_present)
+      ? "지원 범위를 벗어난 쟁점이 섞여 있어 단정 결론을 제한했습니다."
+      : undefined,
+    ((!legalAnalysis.can_sue || safetyGate?.adjusted_output) && safetyGate?.blocked_reasons?.includes("citation_integrity"))
+      ? "직접 연결된 법령·판례 인용이 완전하지 않아 단정 결론을 피했습니다."
+      : undefined,
+    ((!legalAnalysis.can_sue || safetyGate?.adjusted_output) && claimSupport?.overall === "missing")
+      ? "최종 판단 문장에 직접 연결된 근거가 부족해 보수적으로 답했습니다."
+      : undefined,
+    ((!legalAnalysis.can_sue || safetyGate?.adjusted_output) && claimSupport?.overall === "partial")
+      ? "일부 판단 문장이 부분 근거만 연결돼 있어 단정 표현을 줄였습니다."
+      : undefined,
+    ((!legalAnalysis.can_sue || safetyGate?.adjusted_output) && verifier?.contradiction_detected)
+      ? "지원 범위와 내부 쟁점 신호 사이 충돌 가능성이 있어 확정 판단을 보류했습니다."
+      : undefined,
+    ((!legalAnalysis.can_sue || safetyGate?.adjusted_output) && confidenceLabel === "low")
+      ? "현재 근거 신뢰도가 낮아 참고용 안내로 제한했습니다."
+      : undefined
+  ]).slice(0, 4);
+
+  const uncertaintyReasons = uniqueStrings([
+    scopeAssessment?.insufficient_facts ? "사실관계가 더 필요해 추가 검토가 안전합니다." : undefined,
+    scopeAssessment?.procedural_heavy ? "절차 중심 사안이라 개별 대응은 전문가 검토가 안전합니다." : undefined,
+    scopeAssessment?.unsupported_issue_present ? "지원 범위를 벗어난 쟁점이 섞여 있어 단정적 안내를 피해야 합니다." : undefined,
+    Number(legalAnalysis.risk_level ?? 0) >= 4 ? "고위험 사안일 수 있어 변호사 상담 필요성을 함께 검토하는 편이 안전합니다." : undefined,
+    confidenceLabel === "low" ? "현재 근거 신뢰도가 낮아 추가 검토가 필요합니다." : undefined,
+    ...(Array.isArray(safetyGate?.warnings) ? safetyGate.warnings : []),
+    ...(Array.isArray(verifier?.warnings) ? verifier.warnings : [])
+  ]).slice(0, 4);
+
+  return {
+    handoff_recommended: handoffRecommended,
+    abstain_reasons: abstainReasons,
+    uncertainty_reasons: uncertaintyReasons
+  };
+}
+
 export function buildProfileConsiderations(
   profileContext?: KeywordVerificationRequest["profileContext"]
 ): string[] {
@@ -346,7 +411,10 @@ export function buildLegalAnalysisPayload(
     scopeAssessment: input.scopeAssessment
   });
 
-  return gatedAnalysis;
+  return {
+    ...gatedAnalysis,
+    review_recommendation: buildReviewRecommendation(gatedAnalysis)
+  };
 }
 
 export function buildReferencePayload(input: ReferencePayloadInput): Pick<

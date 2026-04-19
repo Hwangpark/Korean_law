@@ -245,6 +245,18 @@ async function main(): Promise<void> {
     throw new Error("expected adjusted keyword safety gate outputs to downgrade can_sue.");
   }
 
+  if (!result.legal_analysis.review_recommendation) {
+    throw new Error("expected keyword legal_analysis to expose review recommendation metadata.");
+  }
+
+  if (!Array.isArray(result.legal_analysis.review_recommendation.abstain_reasons)) {
+    throw new Error("expected keyword review recommendation abstain reasons.");
+  }
+
+  if (result.legal_analysis.safety_gate?.status !== "passed" && result.legal_analysis.review_recommendation.abstain_reasons.length === 0) {
+    throw new Error("expected adjusted keyword outputs to explain why the answer abstained.");
+  }
+
   if (typeof result.legal_analysis.can_sue !== "boolean" || typeof result.legal_analysis.risk_level !== "number") {
     throw new Error("expected legal_analysis judgment outputs.");
   }

@@ -296,6 +296,76 @@ function sanitizeSafetyGate(value: unknown): Record<string, unknown> {
   };
 }
 
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function sanitizeReviewRecommendation(legalAnalysis: KeywordVerificationResponse["legal_analysis"]): Record<string, unknown> {
+  const safetyGate = sanitizeSafetyGate(legalAnalysis?.safety_gate);
+  const verifier = sanitizeVerifier(legalAnalysis?.verifier);
+  const claimSupport = sanitizeClaimSupport(legalAnalysis?.claim_support);
+  const scopeAssessment = {
+    procedural_heavy: sanitizeBoolean(legalAnalysis?.scope_assessment?.procedural_heavy),
+    insufficient_facts: sanitizeBoolean(legalAnalysis?.scope_assessment?.insufficient_facts),
+    unsupported_issue_present: sanitizeBoolean(legalAnalysis?.scope_assessment?.unsupported_issue_present)
+  };
+  const confidenceLabel = sanitizeString((verifier.confidence_calibration as Record<string, unknown> | undefined)?.label);
+  const canSue = sanitizeBoolean(legalAnalysis?.can_sue);
+  const riskLevel = sanitizeNumber(legalAnalysis?.risk_level);
+  const handoffRecommended =
+    riskLevel >= 4
+    || scopeAssessment.procedural_heavy
+    || scopeAssessment.insufficient_facts
+    || scopeAssessment.unsupported_issue_present
+    || sanitizeBoolean(safetyGate.adjusted_output)
+    || sanitizeString(verifier.status) === "needs_caution"
+    || confidenceLabel === "low";
+
+  const blockedReasons = sanitizeStringArray(safetyGate.blocked_reasons);
+  const abstainReasons = uniqueStrings([
+    ...((!canSue || sanitizeBoolean(safetyGate.adjusted_output)) && scopeAssessment.insufficient_facts
+      ? ["핵심 사실이 더 필요해 확정 판단을 보류했습니다."]
+      : []),
+    ...((!canSue || sanitizeBoolean(safetyGate.adjusted_output)) && scopeAssessment.procedural_heavy
+      ? ["절차 중심 사안이라 개별 사실판단보다 절차 확인과 전문가 검토를 우선했습니다."]
+      : []),
+    ...((!canSue || sanitizeBoolean(safetyGate.adjusted_output)) && scopeAssessment.unsupported_issue_present
+      ? ["지원 범위를 벗어난 쟁점이 섞여 있어 단정 결론을 제한했습니다."]
+      : []),
+    ...((!canSue || sanitizeBoolean(safetyGate.adjusted_output)) && blockedReasons.includes("citation_integrity")
+      ? ["직접 연결된 법령·판례 인용이 완전하지 않아 단정 결론을 피했습니다."]
+      : []),
+    ...((!canSue || sanitizeBoolean(safetyGate.adjusted_output)) && sanitizeString(claimSupport.overall) === "missing"
+      ? ["최종 판단 문장에 직접 연결된 근거가 부족해 보수적으로 답했습니다."]
+      : []),
+    ...((!canSue || sanitizeBoolean(safetyGate.adjusted_output)) && sanitizeString(claimSupport.overall) === "partial"
+      ? ["일부 판단 문장이 부분 근거만 연결돼 있어 단정 표현을 줄였습니다."]
+      : []),
+    ...((!canSue || sanitizeBoolean(safetyGate.adjusted_output)) && sanitizeBoolean(verifier.contradiction_detected)
+      ? ["지원 범위와 내부 쟁점 신호 사이 충돌 가능성이 있어 확정 판단을 보류했습니다."]
+      : []),
+    ...((!canSue || sanitizeBoolean(safetyGate.adjusted_output)) && confidenceLabel === "low"
+      ? ["현재 근거 신뢰도가 낮아 참고용 안내로 제한했습니다."]
+      : [])
+  ]).slice(0, 4);
+
+  const uncertaintyReasons = uniqueStrings([
+    ...(scopeAssessment.insufficient_facts ? ["사실관계가 더 필요해 추가 검토가 안전합니다."] : []),
+    ...(scopeAssessment.procedural_heavy ? ["절차 중심 사안이라 개별 대응은 전문가 검토가 안전합니다."] : []),
+    ...(scopeAssessment.unsupported_issue_present ? ["지원 범위를 벗어난 쟁점이 섞여 있어 단정적 안내를 피해야 합니다."] : []),
+    ...(riskLevel >= 4 ? ["고위험 사안일 수 있어 변호사 상담 필요성을 함께 검토하는 편이 안전합니다."] : []),
+    ...(confidenceLabel === "low" ? ["현재 근거 신뢰도가 낮아 추가 검토가 필요합니다."] : []),
+    ...sanitizeStringArray(safetyGate.warnings),
+    ...sanitizeStringArray(verifier.warnings)
+  ]).slice(0, 4);
+
+  return {
+    handoff_recommended: handoffRecommended,
+    abstain_reasons: abstainReasons,
+    uncertainty_reasons: uncertaintyReasons
+  };
+}
+
 function sanitizeQueryRefs(value: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) {
     return [];
@@ -466,6 +536,7 @@ function sanitizePublicLegalAnalysis(
     claim_support: sanitizeClaimSupport(legalAnalysis?.claim_support),
     verifier: sanitizeVerifier(legalAnalysis?.verifier),
     safety_gate: sanitizeSafetyGate(legalAnalysis?.safety_gate),
+    review_recommendation: sanitizeReviewRecommendation(legalAnalysis),
     selected_reference_ids: sanitizeStringArray(legalAnalysis?.selected_reference_ids),
     charges: sanitizePublicCharges(legalAnalysis?.charges),
     recommended_actions: sanitizeStringArray(legalAnalysis?.recommended_actions),

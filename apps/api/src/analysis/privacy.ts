@@ -468,8 +468,10 @@ function buildReviewRecommendation(record: Record<string, unknown>): Record<stri
   const verifier = sanitizeVerifier(record.verifier);
   const safetyGate = sanitizeSafetyGate(record.safety_gate);
   const scopeAssessment = sanitizeScopeAssessment(record.scope_assessment);
+  const claimSupport = sanitizeClaimSupport(record.claim_support);
   const highRiskEscalation = asRecord(record.high_risk_escalation);
   const riskLevel = asNumber(record.risk_level, 0);
+  const canSue = asBoolean(record.can_sue);
   const confidenceLabel = asString(asRecord(verifier.confidence_calibration).label);
   const handoffRecommended =
     riskLevel >= 4
@@ -480,6 +482,36 @@ function buildReviewRecommendation(record: Record<string, unknown>): Record<stri
     || safetyGate.adjusted_output === true
     || verifier.status === "needs_caution"
     || confidenceLabel === "low";
+
+  const abstainReasons = uniqueStrings([
+    ...((!canSue || safetyGate.adjusted_output) && scopeAssessment.insufficient_facts
+      ? ["핵심 사실이 더 필요해 확정 판단을 보류했습니다."]
+      : []),
+    ...((!canSue || safetyGate.adjusted_output) && scopeAssessment.procedural_heavy
+      ? ["절차 중심 사안이라 개별 사실판단보다 절차 확인과 전문가 검토를 우선했습니다."]
+      : []),
+    ...((!canSue || safetyGate.adjusted_output) && scopeAssessment.unsupported_issue_present
+      ? ["지원 범위를 벗어난 쟁점이 섞여 있어 단정 결론을 제한했습니다."]
+      : []),
+    ...((!canSue || safetyGate.adjusted_output) && sanitizeStringArray(safetyGate.blocked_reasons).includes("citation_integrity")
+      ? ["직접 연결된 법령·판례 인용이 완전하지 않아 단정 결론을 피했습니다."]
+      : []),
+    ...((!canSue || safetyGate.adjusted_output) && claimSupport.overall === "missing"
+      ? ["최종 판단 문장에 직접 연결된 근거가 부족해 보수적으로 답했습니다."]
+      : []),
+    ...((!canSue || safetyGate.adjusted_output) && claimSupport.overall === "partial"
+      ? ["일부 판단 문장이 부분 근거만 연결돼 있어 단정 표현을 줄였습니다."]
+      : []),
+    ...((!canSue || safetyGate.adjusted_output) && verifier.contradiction_detected
+      ? ["지원 범위와 내부 쟁점 신호 사이 충돌 가능성이 있어 확정 판단을 보류했습니다."]
+      : []),
+    ...((!canSue || safetyGate.adjusted_output) && confidenceLabel === "low"
+      ? ["현재 근거 신뢰도가 낮아 참고용 안내로 제한했습니다."]
+      : []),
+    ...((!canSue || safetyGate.adjusted_output) && asBoolean(highRiskEscalation.triggered)
+      ? ["긴급 또는 고위험 신호가 있어 법률 판단보다 안전 확보와 증거 보존을 우선했습니다."]
+      : [])
+  ]).slice(0, 4);
 
   const uncertaintyReasons = uniqueStrings([
     ...(scopeAssessment.insufficient_facts ? ["사실관계가 더 필요해 추가 검토가 안전합니다."] : []),
@@ -494,6 +526,7 @@ function buildReviewRecommendation(record: Record<string, unknown>): Record<stri
 
   return {
     handoff_recommended: handoffRecommended,
+    abstain_reasons: abstainReasons,
     uncertainty_reasons: uncertaintyReasons
   };
 }

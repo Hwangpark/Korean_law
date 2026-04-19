@@ -437,6 +437,11 @@ export interface KeywordVerificationResponse {
       blocked_reasons: string[];
       warnings: string[];
     };
+    review_recommendation?: {
+      handoff_recommended: boolean;
+      abstain_reasons: string[];
+      uncertainty_reasons: string[];
+    };
     precedent_cards: Array<{
       case_no: string;
       court: string;
