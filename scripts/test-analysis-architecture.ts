@@ -1532,6 +1532,172 @@ async function main() {
     "public analysis payload must not expose raw high-risk escalation internals"
   );
 
+  const mixedScopeStored = buildStoredAnalysisResult({
+    meta: {
+      provider_mode: "mock",
+      generated_at: "2026-04-14T00:00:00.000Z",
+      input_type: "text",
+      context_type: "community"
+    },
+    legal_analysis: {
+      can_sue: false,
+      risk_level: 3,
+      summary: "지원 쟁점은 일부 검토되지만 범위를 벗어난 요소가 함께 있습니다.",
+      charges: [
+        {
+          charge: "명예훼손",
+          basis: "형법 제307조 검토",
+          probability: "medium",
+          expected_penalty: "3년 이하 징역",
+          elements_met: ["공연성", "사실 적시"],
+          grounding: {
+            law_reference_id: "law:test",
+            reference_key: "law:test",
+            citation_id: "law-citation:test",
+            precedent_reference_ids: [],
+            precedent_citation_ids: [],
+            evidence_count: 1,
+            query_refs: [],
+            match_reason: "지원 쟁점을 직접 뒷받침합니다.",
+            snippet: { field: "content", text: "공연히 사실을 적시" }
+          }
+        }
+      ],
+      verifier: {
+        stage: "pre_analysis_verifier",
+        status: "warning",
+        evidence_sufficient: true,
+        citation_integrity: true,
+        contradiction_detected: false,
+        selected_reference_count: 1,
+        issue_count: 2,
+        confidence_calibration: {
+          score: 0.62,
+          label: "medium"
+        },
+        warnings: []
+      },
+      safety_gate: {
+        stage: "pre_output_safety_gate",
+        status: "adjusted",
+        adjusted_output: true,
+        blocked_reasons: ["unsupported_issue_present"],
+        warnings: ["지원 범위 밖 이슈가 포함될 수 있어 단정적 해석을 피했습니다."]
+      },
+      scope_assessment: {
+        supported_issues: ["명예훼손"],
+        unsupported_issues: ["이혼/가사"],
+        procedural_heavy: false,
+        insufficient_facts: false,
+        unsupported_issue_present: true,
+        warnings: []
+      }
+    }
+  });
+
+  assert.equal(mixedScopeStored.legal_analysis?.charges?.length, 1, "stored analysis should keep supported charges even when mixed scope forces handoff");
+  assert.deepEqual(
+    mixedScopeStored.legal_analysis?.review_recommendation,
+    {
+      handoff_recommended: true,
+      abstain_reasons: ["지원 범위를 벗어난 쟁점이 섞여 있어 단정 결론을 제한했습니다."],
+      uncertainty_reasons: [
+        "지원 범위를 벗어난 쟁점이 섞여 있어 단정적 안내를 피해야 합니다.",
+        "지원 범위 밖 이슈가 포함될 수 있어 단정적 해석을 피했습니다."
+      ]
+    },
+    "stored analysis should preserve mixed-scope handoff guidance while keeping supported issue output"
+  );
+  assert.ok(
+    mixedScopeStored.legal_analysis?.safety_gate?.blocked_reasons?.includes("unsupported_issue_present"),
+    "stored analysis should keep unsupported_issue_present block reasons for mixed scope"
+  );
+
+  const mixedScopePublic = buildPublicAnalysisResult(
+    "job-mixed-scope-test",
+    {
+      meta: {
+        provider_mode: "mock",
+        generated_at: "2026-04-14T00:00:00.000Z",
+        input_type: "text",
+        context_type: "community"
+      },
+      legal_analysis: {
+        can_sue: false,
+        risk_level: 3,
+        summary: "지원 쟁점은 일부 검토되지만 범위를 벗어난 요소가 함께 있습니다.",
+        charges: [
+          {
+            charge: "명예훼손",
+            basis: "형법 제307조 검토",
+            probability: "medium",
+            expected_penalty: "3년 이하 징역",
+            elements_met: ["공연성", "사실 적시"],
+            grounding: {
+              law_reference_id: "law:test",
+              reference_key: "law:test",
+              citation_id: "law-citation:test",
+              precedent_reference_ids: [],
+              precedent_citation_ids: [],
+              evidence_count: 1,
+              query_refs: [],
+              match_reason: "지원 쟁점을 직접 뒷받침합니다.",
+              snippet: { field: "content", text: "공연히 사실을 적시" }
+            }
+          }
+        ],
+        verifier: {
+          stage: "pre_analysis_verifier",
+          status: "warning",
+          evidence_sufficient: true,
+          citation_integrity: true,
+          contradiction_detected: false,
+          selected_reference_count: 1,
+          issue_count: 2,
+          confidence_calibration: {
+            score: 0.62,
+            label: "medium"
+          },
+          warnings: []
+        },
+        safety_gate: {
+          stage: "pre_output_safety_gate",
+          status: "adjusted",
+          adjusted_output: true,
+          blocked_reasons: ["unsupported_issue_present"],
+          warnings: ["지원 범위 밖 이슈가 포함될 수 있어 단정적 해석을 피했습니다."]
+        },
+        scope_assessment: {
+          supported_issues: ["명예훼손"],
+          unsupported_issues: ["이혼/가사"],
+          procedural_heavy: false,
+          insufficient_facts: false,
+          unsupported_issue_present: true,
+          warnings: []
+        }
+      }
+    },
+    []
+  );
+
+  assert.equal(mixedScopePublic.legal_analysis?.charges?.length, 1, "public analysis should keep supported charges even when mixed scope forces handoff");
+  assert.deepEqual(
+    mixedScopePublic.legal_analysis?.review_recommendation,
+    {
+      handoff_recommended: true,
+      abstain_reasons: ["지원 범위를 벗어난 쟁점이 섞여 있어 단정 결론을 제한했습니다."],
+      uncertainty_reasons: [
+        "지원 범위를 벗어난 쟁점이 섞여 있어 단정적 안내를 피해야 합니다.",
+        "지원 범위 밖 이슈가 포함될 수 있어 단정적 해석을 피했습니다."
+      ]
+    },
+    "public analysis should preserve mixed-scope handoff guidance while keeping supported issue output"
+  );
+  assert.ok(
+    mixedScopePublic.legal_analysis?.safety_gate?.blocked_reasons?.includes("unsupported_issue_present"),
+    "public analysis should keep unsupported_issue_present block reasons for mixed scope"
+  );
+
   assert.deepEqual(
     publicResult.legal_analysis?.grounding_evidence,
     {
