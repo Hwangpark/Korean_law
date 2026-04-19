@@ -3,6 +3,7 @@ import {
   formatProviderSourceLabel,
   formatSupportLevel,
   formatVerifierStatus,
+  getAuthoritySignal,
   getRuntimeTrustHeadline,
 } from './trust-status';
 
@@ -49,4 +50,35 @@ assertEqual(
   getRuntimeTrustHeadline({ providerMode: 'live', providerSource: 'live_fallback' }),
   'fixture fallback 결과',
   'live fallback provider label',
+);
+
+assertEqual(
+  getAuthoritySignal({
+    evidenceSufficient: true,
+    claimSupportOverall: 'direct',
+    missingPointCount: 0,
+    unsupportedPointCount: 0,
+  }).level,
+  'review_ready',
+  'authority review-ready level',
+);
+assertEqual(
+  getAuthoritySignal({
+    evidenceSufficient: false,
+    claimSupportOverall: 'partial',
+    missingPointCount: 2,
+    unsupportedPointCount: 0,
+  }).label,
+  '제한적 참고',
+  'authority limited label',
+);
+assertEqual(
+  getAuthoritySignal({
+    handoffRecommended: true,
+    abstainReasons: ['상대방 신원 확인 필요'],
+    evidenceSufficient: false,
+    claimSupportOverall: 'missing',
+  }).level,
+  'handoff',
+  'authority handoff level',
 );

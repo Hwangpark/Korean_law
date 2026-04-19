@@ -34,6 +34,7 @@ import {
   formatConfidenceLabel,
   formatSupportLevel,
   formatVerifierStatus,
+  getAuthoritySignal,
   getRuntimeTrustHeadline,
   type ProviderSource,
 } from './lib/trust-status';
@@ -1069,7 +1070,17 @@ function normalizeReviewRecommendation(value: unknown): ReviewRecommendation | n
 }
 
 function buildTrustDetail(result: AnalysisResult): DetailPanelData {
+  const authoritySignal = getAuthoritySignal({
+    handoffRecommended: result.review_recommendation?.handoffRecommended,
+    abstainReasons: result.review_recommendation?.abstainReasons,
+    uncertaintyReasons: result.review_recommendation?.uncertaintyReasons,
+    evidenceSufficient: result.verifier?.evidenceSufficient,
+    claimSupportOverall: result.claim_support?.overall,
+    missingPointCount: result.fact_sheet?.missingPoints.length,
+    unsupportedPointCount: result.fact_sheet?.unsupportedPoints.length,
+  });
   const factHighlights = [
+    `${authoritySignal.label}: ${authoritySignal.headline}`,
     ...(result.fact_sheet?.keyPoints ?? []),
     ...(result.fact_sheet?.recommendedFocus ?? []),
     ...(result.fact_sheet?.missingPoints ?? []).map((item) => `보강 필요: ${item}`),
@@ -1084,6 +1095,7 @@ function buildTrustDetail(result: AnalysisResult): DetailPanelData {
     '분석 신뢰 신호',
     result.summary,
     [
+      { label: '사용 범위', value: authoritySignal.label },
       { label: '검증 상태', value: formatVerifierStatus(result.verifier?.status ?? 'unknown') },
       { label: '근거 충분성', value: result.verifier?.evidenceSufficient ? '충분' : '보강 필요' },
       { label: '인용 무결성', value: result.verifier?.citationIntegrity ? '확인됨' : '미흡' },
@@ -1732,6 +1744,17 @@ export default function App() {
         result.fact_sheet?.unsupportedPoints.length ? `미확인 ${result.fact_sheet.unsupportedPoints.length}개` : '',
       ].filter((item): item is string => item.length > 0)
     : [];
+  const authoritySignal = result
+    ? getAuthoritySignal({
+        handoffRecommended: result.review_recommendation?.handoffRecommended,
+        abstainReasons: result.review_recommendation?.abstainReasons,
+        uncertaintyReasons: result.review_recommendation?.uncertaintyReasons,
+        evidenceSufficient: result.verifier?.evidenceSufficient,
+        claimSupportOverall: result.claim_support?.overall,
+        missingPointCount: result.fact_sheet?.missingPoints.length,
+        unsupportedPointCount: result.fact_sheet?.unsupportedPoints.length,
+      })
+    : null;
   const claimSupportPreview = result?.claim_support?.entries.slice(0, 4) ?? [];
 
   function closeAnalysisStream() {
@@ -3253,13 +3276,32 @@ export default function App() {
             <section className="result-section trust-panel-section">
               <div className="trust-panel-head">
                 <div>
-                  <h3 className="section-title">사실 · 검증 신호</h3>
-                  <p className="detail-panel-sub">핵심 사실, 빠진 사실, 검증 상태를 메인 판단 옆에서만 간단히 보여줍니다.</p>
+                  <h3 className="section-title">사실 · 검증 · 인계 신호</h3>
+                  <p className="detail-panel-sub">핵심 사실, 빠진 사실, 검증 상태와 전문가 인계 필요 여부를 함께 보여줍니다.</p>
                 </div>
                 <button className="card-detail-btn" type="button" onClick={() => setSelectedDetail(buildTrustDetail(result))}>
                   상세 보기
                 </button>
               </div>
+
+              {authoritySignal && (
+                <div className={`trust-panel-card authority-signal-card authority-signal-${authoritySignal.level}`}>
+                  <div className="trust-panel-status-row">
+                    <span className={`trust-status-pill trust-status-${authoritySignal.level}`}>{authoritySignal.label}</span>
+                  </div>
+                  <div className="authority-signal-copy">
+                    <strong>{authoritySignal.headline}</strong>
+                    <p>{authoritySignal.description}</p>
+                  </div>
+                  {authoritySignal.reasons.length > 0 && (
+                    <div className="trust-warning-list">
+                      {authoritySignal.reasons.slice(0, 3).map((reason) => (
+                        <div key={reason} className="trust-warning-item">{reason}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {result.verifier && (
                 <div className="trust-panel-card">
