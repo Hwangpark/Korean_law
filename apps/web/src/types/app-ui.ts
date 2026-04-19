@@ -32,6 +32,28 @@ export type DetailReference = {
   url?: string;
   href?: string;
   subtitle?: string;
+  sourceMode?: string;
+  source_mode?: string;
+  confidenceScore?: number;
+  confidence_score?: number;
+  matchReason?: string;
+  match_reason?: string;
+  matchedQueryRefs?: Array<Record<string, unknown>>;
+  matched_query_refs?: Array<Record<string, unknown>>;
+  referenceKey?: string;
+  reference_key?: string;
+  citationId?: string;
+  citation_id?: string;
+  referenceId?: string;
+  reference_id?: string;
+  lawReferenceId?: string;
+  law_reference_id?: string;
+  precedentReferenceIds?: string[];
+  precedent_reference_ids?: string[];
+  snippet?: {
+    field?: string;
+    text?: string;
+  };
 };
 
 export type DetailQueryRef = {

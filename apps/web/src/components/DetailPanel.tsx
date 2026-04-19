@@ -1,4 +1,5 @@
-import type { DetailPanelData } from '../types/app-ui';
+import { formatReferenceConfidenceScore, formatReferenceSourceMode } from '../lib/reference-provenance';
+import type { DetailPanelData, DetailReference } from '../types/app-ui';
 
 type DetailPanelProps = {
   data: DetailPanelData | null;
@@ -9,6 +10,13 @@ type DetailPanelProps = {
   inline?: boolean;
   countLabel?: string;
 };
+
+function getReferenceMetaLabels(ref: DetailReference) {
+  return [
+    formatReferenceSourceMode(ref.sourceMode ?? ref.source_mode),
+    formatReferenceConfidenceScore(ref.confidenceScore ?? ref.confidence_score),
+  ].filter((item): item is string => item.length > 0);
+}
 
 export function DetailPanel({
   data,
@@ -146,8 +154,10 @@ export function DetailPanel({
 
           {data.references.length > 0 ? (
             <div className="detail-reference-list">
-              {data.references.map((ref) =>
-                ref.url ? (
+              {data.references.map((ref) => {
+                const referenceMetaLabels = getReferenceMetaLabels(ref);
+
+                return ref.url ? (
                   <a
                     key={`${ref.title}-${ref.summary}-${ref.url}`}
                     className="detail-reference-item"
@@ -160,6 +170,13 @@ export function DetailPanel({
                       <span>{ref.summary}</span>
                     </div>
                     {ref.subtitle && <span className="detail-reference-subtitle">{ref.subtitle}</span>}
+                    {referenceMetaLabels.length > 0 && (
+                      <div className="detail-reference-meta">
+                        {referenceMetaLabels.map((label) => (
+                          <span key={label}>{label}</span>
+                        ))}
+                      </div>
+                    )}
                     <span className="detail-reference-link">원문</span>
                   </a>
                 ) : (
@@ -169,9 +186,16 @@ export function DetailPanel({
                       <span>{ref.summary}</span>
                     </div>
                     {ref.subtitle && <span className="detail-reference-subtitle">{ref.subtitle}</span>}
+                    {referenceMetaLabels.length > 0 && (
+                      <div className="detail-reference-meta">
+                        {referenceMetaLabels.map((label) => (
+                          <span key={label}>{label}</span>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                ),
-              )}
+                );
+              })}
             </div>
           ) : (
             <div className="detail-empty">참고 라이브러리가 없으면 카드의 핵심 정보만 우선 표시됩니다.</div>

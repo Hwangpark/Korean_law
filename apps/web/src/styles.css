@@ -2214,6 +2214,22 @@ body {
   color: var(--ink-dim);
 }
 
+.detail-reference-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.detail-reference-meta span {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.82);
+  border: 1px solid rgba(37,99,235,.14);
+  color: var(--navy);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
 .detail-reference-link {
   justify-self: start;
   font-size: 0.72rem;

@@ -121,8 +121,11 @@ export type AnalysisReferenceItem = {
   snippet?: {
     field?: string;
     text?: string;
-  };
+  } | string;
   sourceMode?: string;
+  source_mode?: string;
+  providerSource?: string;
+  provider_source?: string;
   similarityScore?: number;
   tags?: string[];
   keywords?: string[];

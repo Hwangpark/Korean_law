@@ -44,6 +44,7 @@ import {
   sanitizeContinuityDraftForStorage,
   type ContinuityDraft,
 } from './lib/continuity';
+import { formatReferenceSourceMode } from './lib/reference-provenance';
 import { DetailPanel } from './components/DetailPanel';
 import { RuntimeDashboard } from './components/RuntimeDashboard';
 import type {
@@ -596,7 +597,11 @@ function normalizeGrounding(value: unknown): DetailGrounding | null {
     return null;
   }
 
-  const snippet = isRecord(value.snippet) ? value.snippet : {};
+  const snippet = isRecord(value.snippet)
+    ? value.snippet
+    : typeof value.snippet === 'string'
+      ? { text: value.snippet }
+      : {};
   const evidenceCount = typeof value.evidence_count === 'number'
     ? value.evidence_count
     : typeof value.evidenceCount === 'number'
@@ -698,6 +703,26 @@ function normalizeReferenceItem(value: unknown): DetailReference | null {
   const url = firstText(value.url, value.link, value.source_url, value.href);
   const href = firstText(value.href);
   const kind = firstText(value.kind, value.category);
+  const sourceMode = firstText(value.sourceMode, value.source_mode, value.providerSource, value.provider_source);
+  const confidenceScore =
+    typeof value.confidence_score === 'number'
+      ? value.confidence_score
+      : typeof value.confidenceScore === 'number'
+        ? value.confidenceScore
+        : undefined;
+  const matchedQueryRefs = Array.isArray(value.matchedQueryRefs)
+    ? value.matchedQueryRefs
+    : Array.isArray(value.matched_query_refs)
+      ? value.matched_query_refs
+      : undefined;
+  const snippet = isRecord(value.snippet)
+    ? {
+        field: firstText(value.snippet.field) || undefined,
+        text: firstText(value.snippet.text) || undefined,
+      }
+    : typeof value.snippet === 'string' && value.snippet.trim()
+      ? { text: value.snippet.trim() }
+      : undefined;
 
   if (!title && !summary) {
     return null;
@@ -710,6 +735,25 @@ function normalizeReferenceItem(value: unknown): DetailReference | null {
     subtitle: subtitle || undefined,
     url: url || undefined,
     href: href || undefined,
+    sourceMode: sourceMode || undefined,
+    source_mode: sourceMode || undefined,
+    confidenceScore,
+    confidence_score: confidenceScore,
+    matchReason: firstText(value.matchReason, value.match_reason) || undefined,
+    match_reason: firstText(value.match_reason, value.matchReason) || undefined,
+    matchedQueryRefs,
+    matched_query_refs: matchedQueryRefs,
+    referenceKey: firstText(value.referenceKey, value.reference_key) || undefined,
+    reference_key: firstText(value.reference_key, value.referenceKey) || undefined,
+    citationId: firstText(value.citationId, value.citation_id) || undefined,
+    citation_id: firstText(value.citation_id, value.citationId) || undefined,
+    referenceId: firstText(value.referenceId, value.reference_id) || undefined,
+    reference_id: firstText(value.reference_id, value.referenceId) || undefined,
+    lawReferenceId: firstText(value.lawReferenceId, value.law_reference_id) || undefined,
+    law_reference_id: firstText(value.law_reference_id, value.lawReferenceId) || undefined,
+    precedentReferenceIds: toTextList(value.precedentReferenceIds ?? value.precedent_reference_ids),
+    precedent_reference_ids: toTextList(value.precedent_reference_ids ?? value.precedentReferenceIds),
+    snippet,
   };
 }
 
@@ -860,9 +904,13 @@ function buildReferenceDetail(
     reference.case_no,
   ) || '참고용 근거입니다.';
   const subtitle = firstText(reference.subtitle, reference.court, reference.verdict, reference.category);
+  const sourceModeLabel = formatReferenceSourceMode(
+    firstText(reference.sourceMode, reference.source_mode, reference.providerSource, reference.provider_source),
+  );
   const metadata = [
     { label: '유형', value: kind === 'law' ? '법령' : '판례' },
     { label: '우선순위', value: `#${index + 1}` },
+    ...(sourceModeLabel ? [{ label: '출처 모드', value: sourceModeLabel }] : []),
     ...(confidenceScore !== null ? [{ label: '근거 점수', value: `${Math.round(confidenceScore * 100)}%` }] : []),
   ];
 
