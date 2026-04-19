@@ -456,6 +456,38 @@ function assertPublicBoundary(publicBody: Record<string, unknown>, internal: Key
   assert.equal(matchedLaw.sourceMode, "fixture", "public matched law card should expose safe sourceMode");
   assert.equal(matchedLaw.provider_source, "fixture", "public matched law card should expose provider_source");
 
+  const matchedPrecedent = Array.isArray(publicBody.matched_precedents)
+    ? publicBody.matched_precedents[0] as Record<string, unknown>
+    : null;
+  const internalPrecedent = internal.matched_precedents[0];
+  assert.ok(matchedPrecedent, "public keyword response should keep matched precedent cards");
+  assert.ok(internalPrecedent, "regression fixture should include at least one matched precedent");
+  assert.equal("reference" in matchedPrecedent, false, "matched precedent card must not embed ReferenceLibraryItem");
+  assert.equal("createdAt" in matchedPrecedent, false, "matched precedent card must not expose storage freshness timestamps");
+  assert.equal("updatedAt" in matchedPrecedent, false, "matched precedent card must not expose storage freshness timestamps");
+  assert.equal(matchedPrecedent.referenceKey, internalPrecedent.referenceKey, "public matched precedent should retain stable reference key");
+  assert.equal(matchedPrecedent.subtitle, internalPrecedent.subtitle, "public matched precedent should retain date-bearing subtitle freshness metadata");
+  assert.match(String(matchedPrecedent.subtitle), /\d{4}-\d{2}-\d{2}/, "public matched precedent subtitle should preserve precedent date metadata");
+  assert.equal(matchedPrecedent.provider_source, internalPrecedent.reference.sourceMode, "public matched precedent should expose safe provider source");
+  assert.equal(matchedPrecedent.sourceMode, internalPrecedent.reference.sourceMode, "public matched precedent should expose safe sourceMode");
+
+  const precedentSource = matchedPrecedent.source as Record<string, unknown>;
+  assert.deepEqual(
+    {
+      case_no: precedentSource.case_no,
+      court: precedentSource.court,
+      verdict: precedentSource.verdict,
+      sentence: precedentSource.sentence
+    },
+    {
+      case_no: internalPrecedent.source.case_no ?? "",
+      court: internalPrecedent.source.court ?? "",
+      verdict: internalPrecedent.source.verdict ?? "",
+      sentence: internalPrecedent.source.sentence ?? ""
+    },
+    "public matched precedent should retain authority metadata needed to judge precedent weight"
+  );
+
   const legalAnalysis = publicBody.legal_analysis as Record<string, unknown>;
   assert.ok(legalAnalysis, "public keyword response should keep legal_analysis");
   assert.equal("reference_library" in legalAnalysis, false, "public legal_analysis must not expose duplicated reference library");
