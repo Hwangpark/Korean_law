@@ -1,0 +1,9 @@
+{
+  "request_id": "sample-mixed-procedural-defamation",
+  "input_type": "text",
+  "context_type": "community",
+  "text": "단톡방에 허위사실을 올려 명예훼손으로 고소했는데, 상대방은 항소이유서에서 증거능력과 공판절차 위법만 다투고 있습니다.",
+  "metadata": {
+    "locale": "ko-KR"
+  }
+}

@@ -37,6 +37,15 @@ services:
       AUTH_JWT_ISSUER: ${AUTH_JWT_ISSUER:-koreanlaw-auth}
       AUTH_JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:-koreanlaw-app}
       AUTH_JWT_TTL_SECONDS: ${AUTH_JWT_TTL_SECONDS:-604800}
+      AUTH_PUBLIC_URL: ${AUTH_PUBLIC_URL:-http://localhost:3001}
+      GMAIL_USER: ${GMAIL_USER:-}
+      GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
+      ANALYSIS_BODY_LIMIT_BYTES: ${ANALYSIS_BODY_LIMIT_BYTES:-12582912}
+      CRAWL_TIMEOUT_MS: ${CRAWL_TIMEOUT_MS:-12000}
+      CRAWL_MAX_BYTES: ${CRAWL_MAX_BYTES:-2000000}
+      LAW_PROVIDER: ${LAW_PROVIDER:-mock}
+      LAW_API_KEY: ${LAW_API_KEY:-}
+      LAW_API_BASE_URL: ${LAW_API_BASE_URL:-https://www.law.go.kr/DRF/}
       DATABASE_URL: postgresql://${POSTGRES_USER:-park}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-koreanlaw}
     ports:
       - "${AUTH_PORT:-3001}:3001"
@@ -65,6 +74,7 @@ services:
     restart: unless-stopped
     environment:
       VITE_AUTH_BASE_URL: ${VITE_AUTH_BASE_URL:-http://localhost:3001}
+      VITE_ANALYSIS_BASE_URL: ${VITE_ANALYSIS_BASE_URL:-http://localhost:3001}
     ports:
       - "${WEB_PORT:-5173}:5173"
     volumes:

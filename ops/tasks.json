@@ -1,0 +1,184 @@
+{
+  "schema_version": 1,
+  "wip_limit": 5,
+  "tasks": [
+    {
+      "id": "orch-001",
+      "title": "Keep orchestration rules aligned with AGENTS.md",
+      "status": "completed",
+      "owner_role": "orchestrator",
+      "files": [
+        "AGENTS.md",
+        "docs/codex-orchestration.md",
+        "ops/agent-roles.json",
+        "ops/tasks.json"
+      ],
+      "validation": [
+        "npm run typecheck"
+      ],
+      "notes": "Initial rule set for file ownership, validation gates, and MCP-first boundaries."
+    },
+    {
+      "id": "orch-002",
+      "title": "Add task queue automation script",
+      "status": "completed",
+      "owner_role": "orchestrator",
+      "files": [
+        "scripts/orchestrator/next-task.ts",
+        "scripts/orchestrator/validate-task.ts"
+      ],
+      "validation": [
+        "npm run typecheck",
+        "npm run orch:validate"
+      ],
+      "notes": "Machine-readable task selection and validation commands now scaffold the orchestration flow."
+    },
+    {
+      "id": "orch-003",
+      "title": "Add reviewer checklist output",
+      "status": "completed",
+      "owner_role": "reviewer",
+      "files": [
+        "docs/review-notes.md"
+      ],
+      "validation": [
+        "npm run check"
+      ],
+      "notes": "Reviewer checklist output generated and written to docs/review-notes.md for orchestration review handoff.",
+      "claimed_by": "reviewer",
+      "claimed_at": "2026-04-17T02:06:14.374Z",
+      "updated_at": "2026-04-17T02:06:14.374Z",
+      "completed_at": "2026-04-17T02:06:14.374Z"
+    },
+    {
+      "id": "orch-004",
+      "title": "Add task brief generator for sub-agent handoff",
+      "status": "completed",
+      "owner_role": "orchestrator",
+      "files": [
+        "scripts/orchestrator/build-brief.ts",
+        "package.json",
+        "ops/tasks.json"
+      ],
+      "validation": [
+        "npm run orch:brief -- --json",
+        "npm run orch:validate",
+        "npm run typecheck"
+      ],
+      "notes": "Reusable handoff briefs now include file ownership, role guardrails, and suggested validation commands."
+    },
+    {
+      "id": "orch-005",
+      "title": "Add claim and status update automation",
+      "status": "completed",
+      "owner_role": "orchestrator",
+      "files": [
+        "scripts/orchestrator/claim-task.ts",
+        "scripts/orchestrator/update-task.ts",
+        "package.json",
+        "ops/tasks.json"
+      ],
+      "validation": [
+        "npm run orch:claim -- --task orch-003 --dry-run",
+        "npm run orch:update -- --task orch-003 --status completed --dry-run",
+        "npm run orch:validate",
+        "npm run typecheck"
+      ],
+      "notes": "Orchestrator can now claim pending tasks and move them across lifecycle states with dry-run support."
+    },
+    {
+      "id": "orch-006",
+      "title": "Add reviewer checklist automation",
+      "status": "completed",
+      "owner_role": "orchestrator",
+      "files": [
+        "scripts/orchestrator/review-checklist.ts",
+        "docs/review-notes.md",
+        "package.json",
+        "ops/tasks.json"
+      ],
+      "validation": [
+        "npm run orch:review -- --task orch-006",
+        "npm run orch:review -- --task orch-006 --write",
+        "npm run orch:validate",
+        "npm run typecheck"
+      ],
+      "notes": "Reviewer checklists can now be generated from task metadata and written to docs/review-notes.md."
+    },
+    {
+      "id": "orch-007",
+      "title": "Prepare subagent runner automation",
+      "status": "completed",
+      "owner_role": "orchestrator",
+      "files": [
+        "scripts/orchestrator/run-subagent.ts",
+        "package.json",
+        "ops/tasks.json",
+        "docs/codex-orchestration.md"
+      ],
+      "validation": [
+        "npm run orch:run -- --json",
+        "npm run orch:validate",
+        "npm run typecheck"
+      ],
+      "notes": "The orchestrator can now emit a spawn-ready OpenClaw subagent task payload for the next pending task."
+    },
+    {
+      "id": "orch-008",
+      "title": "Connect orchestration runner to live OpenClaw session spawning",
+      "status": "completed",
+      "owner_role": "orchestrator",
+      "files": [
+        "docs/codex-orchestration.md",
+        "ops/tasks.json"
+      ],
+      "validation": [
+        "npm run orch:run -- --json",
+        "npm run orch:validate",
+        "npm run typecheck"
+      ],
+      "notes": "Documented the mapping from repo-side run payloads to OpenClaw sessions_spawn and sessions_yield flow."
+    },
+    {
+      "id": "orch-009",
+      "title": "Pilot one delegated KoreanLaw task through a real subagent run",
+      "status": "completed",
+      "owner_role": "orchestrator",
+      "files": [
+        "docs/review-notes.md",
+        "ops/tasks.json"
+      ],
+      "validation": [
+        "npm run orch:review -- --task orch-003",
+        "npm run orch:validate",
+        "npm run typecheck"
+      ],
+      "notes": "Piloted orch-003 through the repo orchestration flow. Recorded the generated brief, spawn-ready handoff payload, and reviewer checklist behavior in docs/review-notes.md.",
+      "claimed_by": "orchestrator",
+      "claimed_at": "2026-04-17T01:49:49.688Z",
+      "updated_at": "2026-04-17T02:01:45Z"
+    },
+    {
+      "id": "web-001",
+      "title": "Add lightweight web regression coverage for trust and provider labels",
+      "status": "completed",
+      "owner_role": "frontend-worker",
+      "files": [
+        "apps/web/package.json",
+        "apps/web/src/App.tsx",
+        "apps/web/src/lib/trust-status.ts",
+        "apps/web/src/lib/trust-status.test.ts"
+      ],
+      "validation": [
+        "npm --prefix apps/web run test -- --run",
+        "npm run web:check",
+        "npm run build:web"
+      ],
+      "notes": "Recent UI fix 23a76d2 closed the passed/warning trust-status gap, but apps/web still has no regression harness. Extract the trust/provider label formatters into a small pure module and cover verifier statuses (passed, warning, needs_caution) plus provider_source labels (fixture, live, live_fallback).",
+      "claimed_by": "orchestrator",
+      "claimed_at": "2026-04-18T23:45:28.007Z",
+      "updated_at": "2026-04-18T23:47:26.328Z",
+      "completed_at": "2026-04-18T23:47:26.328Z"
+    }
+  ]
+}

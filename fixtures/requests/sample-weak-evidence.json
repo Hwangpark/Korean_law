@@ -1,0 +1,9 @@
+{
+  "request_id": "sample-weak-evidence",
+  "input_type": "text",
+  "context_type": "messenger",
+  "text": "걔가 좀 이상하다는 말만 들었고 기분이 나빴어요.",
+  "metadata": {
+    "locale": "ko-KR"
+  }
+}

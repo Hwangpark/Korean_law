@@ -24,11 +24,20 @@ export interface JwtConfig {
   expiresInSeconds: number;
 }
 
+export interface EmailConfig {
+  user: string;
+  appPassword: string;
+  enabled: boolean;
+  baseUrl: string;
+}
+
 export interface AuthConfig {
   port: number;
-  corsOrigin: string;
+  corsOrigins: string[];
+  trustedProxyAddresses: string[];
   database: DatabaseConfig;
   jwt: JwtConfig;
+  email: EmailConfig;
   nodeEnv: string;
   requestBodyLimit: number;
   requestIdPrefix: string;
@@ -37,6 +46,23 @@ export interface AuthConfig {
 function parseIntOr(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function requireInProduction(
+  value: string | undefined,
+  fallback: string,
+  name: string,
+  nodeEnv: string
+): string {
+  if (value) {
+    return value;
+  }
+
+  if (nodeEnv === "production") {
+    throw new Error(`${name} must be set in production.`);
+  }
+
+  return fallback;
 }
 
 function parseDatabaseUrl(databaseUrl: string): DatabaseConfig {
@@ -55,6 +81,7 @@ function parseDatabaseUrl(databaseUrl: string): DatabaseConfig {
 }
 
 export function loadAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig {
+  const nodeEnv = env.NODE_ENV || "development";
   const database = env.DATABASE_URL
     ? parseDatabaseUrl(env.DATABASE_URL)
     : {
@@ -62,20 +89,53 @@ export function loadAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig
         port: parseIntOr(env.PGPORT || env.POSTGRES_PORT, 5432),
         database: env.PGDATABASE || env.POSTGRES_DB || "koreanlaw",
         user: env.PGUSER || env.POSTGRES_USER || "park",
-        password: env.PGPASSWORD || env.POSTGRES_PASSWORD || "park8948"
+        password: requireInProduction(
+          env.PGPASSWORD || env.POSTGRES_PASSWORD,
+          "park8948",
+          "POSTGRES_PASSWORD",
+          nodeEnv
+        )
       };
 
+  const port = parseIntOr(env.AUTH_PORT || env.API_PORT, 3001);
+  const gmailUser = env.GMAIL_USER || "minstock.official@gmail.com";
+  const gmailPass = env.GMAIL_APP_PASSWORD || "";
+
+  const corsOriginEnv = env.AUTH_CORS_ORIGIN || (nodeEnv === "development" ? "http://localhost:5173" : "*");
+  const corsOrigins = corsOriginEnv.split(",").map((s) => s.trim()).filter(Boolean);
+  const trustedProxyAddresses = (
+    env.AUTH_TRUST_PROXY_IPS ||
+    env.API_TRUST_PROXY_IPS ||
+    env.TRUST_PROXY_IPS ||
+    ""
+  )
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
   return {
-    port: parseIntOr(env.AUTH_PORT || env.API_PORT, 3001),
-    corsOrigin: env.AUTH_CORS_ORIGIN || "*",
+    port,
+    corsOrigins,
+    trustedProxyAddresses,
     jwt: {
-      secret: env.AUTH_JWT_SECRET || "koreanlaw-dev-jwt-secret",
+      secret: requireInProduction(
+        env.AUTH_JWT_SECRET,
+        "koreanlaw-dev-jwt-secret",
+        "AUTH_JWT_SECRET",
+        nodeEnv
+      ),
       issuer: env.AUTH_JWT_ISSUER || "koreanlaw-auth",
       audience: env.AUTH_JWT_AUDIENCE || "koreanlaw-app",
       expiresInSeconds: parseIntOr(env.AUTH_JWT_TTL_SECONDS, 60 * 60 * 24 * 7)
     },
     database,
-    nodeEnv: env.NODE_ENV || "development",
+    email: {
+      user: gmailUser,
+      appPassword: gmailPass,
+      enabled: gmailPass.length > 0,
+      baseUrl: env.AUTH_PUBLIC_URL || `http://localhost:${port}`,
+    },
+    nodeEnv,
     requestBodyLimit: parseIntOr(env.AUTH_BODY_LIMIT_BYTES, 1_048_576),
     requestIdPrefix: env.AUTH_REQUEST_PREFIX || `auth-${crypto.randomBytes(4).toString("hex")}`
   };

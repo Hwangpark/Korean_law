@@ -1,0 +1,9 @@
+{
+  "request_id": "sample-mixed-fraud-threat",
+  "input_type": "text",
+  "context_type": "messenger",
+  "text": "중고거래에서 정품이라고 속여 돈을 입금받고 잠수하더니, 신고하면 집에 찾아가 죽여버리겠다고 협박하며 합의금을 보내라고 합니다.",
+  "metadata": {
+    "locale": "ko-KR"
+  }
+}

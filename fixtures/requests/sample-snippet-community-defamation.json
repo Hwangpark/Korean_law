@@ -1,0 +1,9 @@
+{
+  "request_id": "sample-snippet-community-defamation",
+  "input_type": "text",
+  "context_type": "community",
+  "text": "커뮤니티 게시판에 제 실명과 회사명을 적고 제가 사기꾼이라고 허위사실을 올렸습니다.",
+  "metadata": {
+    "locale": "ko-KR"
+  }
+}

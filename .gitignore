@@ -2,7 +2,11 @@
 node_modules
 .env
 .env.local
+.claude/
+.codex/
+.codex-api-*.log
 .turbo
 dist
 coverage
 tmp
+korean_law_multiagent_architecture.svg

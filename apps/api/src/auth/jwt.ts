@@ -22,6 +22,13 @@ interface JwtOptions {
   expiresInSeconds: number;
 }
 
+interface VerifyJwtOptions {
+  secret: string;
+  issuer: string;
+  audience: string;
+  type?: "access";
+}
+
 function base64url(input: string): string {
   return Buffer.from(input).toString("base64url");
 }
@@ -48,14 +55,14 @@ export function signJwt(payload: JwtPayload, options: JwtOptions): string {
   return `${unsigned}.${signature}`;
 }
 
-export function verifyJwt(token: string, secret: string): JwtPayload {
+export function verifyJwt(token: string, options: VerifyJwtOptions): JwtPayload {
   const [headerPart, payloadPart, signaturePart] = String(token || "").split(".");
   if (!headerPart || !payloadPart || !signaturePart) {
     throw new Error("Invalid token format.");
   }
 
   const unsigned = `${headerPart}.${payloadPart}`;
-  const expected = decodeBase64Url(signHmacSha256(unsigned, secret));
+  const expected = decodeBase64Url(signHmacSha256(unsigned, options.secret));
   const actual = decodeBase64Url(signaturePart);
   if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) {
     throw new Error("Invalid token signature.");
@@ -64,6 +71,15 @@ export function verifyJwt(token: string, secret: string): JwtPayload {
   const payload = JSON.parse(decodeBase64Url(payloadPart).toString("utf8")) as JwtPayload;
   if (payload.exp * 1000 < Date.now()) {
     throw new Error("Token expired.");
+  }
+  if (payload.iss !== options.issuer) {
+    throw new Error("Invalid token issuer.");
+  }
+  if (payload.aud !== options.audience) {
+    throw new Error("Invalid token audience.");
+  }
+  if (options.type && payload.type !== options.type) {
+    throw new Error("Invalid token type.");
   }
   return payload;
 }
