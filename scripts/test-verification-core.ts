@@ -9,6 +9,7 @@ import {
   VERIFICATION_DISCLAIMER,
   severityToRiskLevel
 } from "../apps/api/src/retrieval/verification-core.js";
+import { buildPrecedentVerificationCards } from "../apps/api/src/retrieval/verification.js";
 import type {
   CandidateIssue,
   EvidenceQueryRef,
@@ -101,6 +102,32 @@ function buildPrecedentCard(reference: ReferenceLibraryItem): VerifiedReferenceC
       sentence: "유죄 취지"
     },
     reference
+  };
+}
+
+function buildPrecedentRecord(params: {
+  caseNo: string;
+  court: string;
+  summary: string;
+  similarityScore: number;
+  referenceKey: string;
+}): import("../apps/api/src/retrieval/types.js").PrecedentDocumentRecord {
+  return {
+    case_no: params.caseNo,
+    court: params.court,
+    date: "2026-04-01",
+    summary: params.summary,
+    verdict: "판결",
+    sentence: "원심 유지",
+    key_reasoning: params.summary,
+    url: "https://example.test/precedent",
+    topics: ["명예훼손"],
+    similarity_score: params.similarityScore,
+    retrieval_evidence: {
+      reference_key: params.referenceKey,
+      matched_queries: ["카카오톡 단톡방 허위사실"],
+      matched_issue_types: ["명예훼손"]
+    }
   };
 }
 
@@ -285,6 +312,50 @@ async function main(): Promise<void> {
 
   if ((analysisPayload.recommended_actions?.length ?? 0) === 0 || (analysisPayload.evidence_to_collect?.length ?? 0) === 0) {
     throw new Error("analysis payload must build shared guidance items.");
+  }
+
+  const supremeReference = {
+    ...buildReference("precedent::2026다54321", "precedent"),
+    id: "precedent::2026다54321",
+    title: "2026다54321",
+    subtitle: "대법원 2026. 5. 1.",
+    caseNo: "2026다54321",
+    court: "대법원"
+  };
+  const districtReference = {
+    ...buildReference("precedent::2026나12345", "precedent"),
+    id: "precedent::2026나12345",
+    title: "2026나12345",
+    subtitle: "서울중앙지방법원 2026. 5. 1.",
+    caseNo: "2026나12345",
+    court: "서울중앙지방법원"
+  };
+  const authorityRankedPrecedents = buildPrecedentVerificationCards(
+    plan,
+    [
+      buildPrecedentRecord({
+        caseNo: "2026나12345",
+        court: "서울중앙지방법원",
+        summary: "카카오톡 단톡방 허위사실 적시가 쟁점인 하급심 사례",
+        similarityScore: 0.82,
+        referenceKey: districtReference.id
+      }),
+      buildPrecedentRecord({
+        caseNo: "2026다54321",
+        court: "대법원",
+        summary: "카카오톡 단톡방 허위사실 적시와 공연성이 문제 된 대법원 사례",
+        similarityScore: 0.76,
+        referenceKey: supremeReference.id
+      })
+    ],
+    new Map([
+      [districtReference.id, districtReference],
+      [supremeReference.id, supremeReference]
+    ])
+  );
+
+  if (authorityRankedPrecedents[0]?.source.court !== "대법원") {
+    throw new Error("precedent ranking should prefer stronger court authority when relevance is similar.");
   }
 
   process.stdout.write("Verification core checks passed.\n");

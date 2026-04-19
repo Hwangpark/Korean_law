@@ -183,6 +183,30 @@ function scoreLawEvidence(plan, law) {
   };
 }
 
+function getCourtAuthorityBoost(court) {
+  const normalizedCourt = normalizeText(court ?? "");
+
+  if (!normalizedCourt) {
+    return 0;
+  }
+  if (normalizedCourt.includes("대법원") || normalizedCourt.includes("헌법재판소")) {
+    return 0.08;
+  }
+  if (normalizedCourt.includes("고등법원") || normalizedCourt.includes("특허법원")) {
+    return 0.04;
+  }
+  if (
+    normalizedCourt.includes("지방법원")
+    || normalizedCourt.includes("가정법원")
+    || normalizedCourt.includes("행정법원")
+    || normalizedCourt.includes("회생법원")
+  ) {
+    return 0.015;
+  }
+
+  return 0;
+}
+
 function scorePrecedentEvidence(plan, precedent) {
   const searchable = normalizeText([
     precedent.case_no,
@@ -213,6 +237,8 @@ function scorePrecedentEvidence(plan, precedent) {
     score += 0.12;
     reason = `확장 질의 ${broadMatches.slice(0, 2).join(", ")} 기준으로 연결된 판례입니다.`;
   }
+
+  score += getCourtAuthorityBoost(precedent.court);
 
   return {
     confidence_score: clampConfidenceScore(score),

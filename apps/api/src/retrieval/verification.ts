@@ -269,6 +269,30 @@ function scoreLaw(plan: KeywordQueryPlan, law: LawDocumentRecord): ScoreResult {
   };
 }
 
+function getCourtAuthorityBoost(court: string | undefined | null): number {
+  const normalizedCourt = normalizeText(court ?? "");
+
+  if (!normalizedCourt) {
+    return 0;
+  }
+  if (normalizedCourt.includes("대법원") || normalizedCourt.includes("헌법재판소")) {
+    return 0.08;
+  }
+  if (normalizedCourt.includes("고등법원") || normalizedCourt.includes("특허법원")) {
+    return 0.04;
+  }
+  if (
+    normalizedCourt.includes("지방법원")
+    || normalizedCourt.includes("가정법원")
+    || normalizedCourt.includes("행정법원")
+    || normalizedCourt.includes("회생법원")
+  ) {
+    return 0.015;
+  }
+
+  return 0;
+}
+
 function scorePrecedent(plan: KeywordQueryPlan, precedent: PrecedentDocumentRecord): ScoreResult {
   const searchable = precedentSearchText(precedent);
   const directMatches = includesAny(searchable, [plan.normalizedQuery, ...plan.tokens]);
@@ -313,6 +337,7 @@ function scorePrecedent(plan: KeywordQueryPlan, precedent: PrecedentDocumentReco
   score += Math.min(rerank.legalElementCoverage * 0.04, 0.12);
   score += Math.min(rerank.hypothesisConfidence * 0.16, 0.16);
   score += rerank.provenanceBoost;
+  score += getCourtAuthorityBoost(precedent.court);
   score -= rerank.scopePenalty;
 
   let reason = "입력과 법적 맥락이 유사한 판례입니다.";
