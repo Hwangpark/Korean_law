@@ -1,3 +1,4 @@
+import { buildAnswerDisposition } from "./answer-disposition.mjs";
 import { sanitizePublicProfileContext } from "./profile-context.js";
 import type { ReferenceLibraryItem } from "./references.js";
 
@@ -577,6 +578,9 @@ function sanitizeCitationMap(value: unknown): Record<string, unknown> | null {
 
 function sanitizePublicLegalAnalysis(value: unknown): Record<string, unknown> {
   const record = asRecord(value);
+  const reviewRecommendation = buildReviewRecommendation(record);
+  const verifier = sanitizeVerifier(record.verifier);
+  const safetyGate = sanitizeSafetyGate(record.safety_gate);
 
   return {
     mode: asString(record.mode, "mock"),
@@ -595,9 +599,18 @@ function sanitizePublicLegalAnalysis(value: unknown): Record<string, unknown> {
     profile_considerations: sanitizeStringArray(record.profile_considerations),
     scope_assessment: sanitizeScopeAssessment(record.scope_assessment),
     claim_support: sanitizeClaimSupport(record.claim_support),
-    verifier: sanitizeVerifier(record.verifier),
-    safety_gate: sanitizeSafetyGate(record.safety_gate),
-    review_recommendation: buildReviewRecommendation(record),
+    verifier,
+    safety_gate: safetyGate,
+    review_recommendation: reviewRecommendation,
+    answer_disposition: buildAnswerDisposition({
+      handoffRecommended: asBoolean(asRecord(reviewRecommendation).handoff_recommended),
+      abstainReasons: asRecord(reviewRecommendation).abstain_reasons,
+      uncertaintyReasons: asRecord(reviewRecommendation).uncertainty_reasons,
+      verifierStatus: asString(verifier.status),
+      highRiskTriggered: asBoolean(asRecord(record.high_risk_escalation).triggered),
+      highRiskEmergency: asBoolean(asRecord(record.high_risk_escalation).emergency),
+      blockedReasons: safetyGate.blocked_reasons
+    }),
     grounding_evidence: sanitizeGroundingEvidenceSummary(record.grounding_evidence),
     selected_reference_ids: sanitizeStringArray(record.selected_reference_ids),
     citation_map: sanitizeCitationMap(record.citation_map),
@@ -622,6 +635,7 @@ function sanitizeStoredLegalAnalysis(value: unknown): Record<string, unknown> {
     verifier: publicShape.verifier,
     safety_gate: publicShape.safety_gate,
     review_recommendation: publicShape.review_recommendation,
+    answer_disposition: publicShape.answer_disposition,
     grounding_evidence: publicShape.grounding_evidence,
     selected_reference_ids: publicShape.selected_reference_ids,
     share_text: publicShape.share_text

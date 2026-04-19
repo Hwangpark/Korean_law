@@ -1018,6 +1018,11 @@ async function main() {
     },
     "stored analysis payload should retain a stable review recommendation contract even when absent"
   );
+  assert.equal(
+    stored.legal_analysis?.answer_disposition,
+    "direct_answer",
+    "stored analysis payload should retain a stable answer disposition contract even when absent"
+  );
   assert.equal("ocr" in stored, false, "stored analysis payload must exclude raw OCR content");
   assert.deepEqual(
     stored.legal_analysis?.grounding_evidence,
@@ -1317,6 +1322,11 @@ async function main() {
     },
     "public analysis response should expose derived review recommendation metadata"
   );
+  assert.equal(
+    publicResult.legal_analysis?.answer_disposition,
+    "limited_answer",
+    "public analysis response should expose limited answer disposition when only cautionary uncertainty remains"
+  );
 
   const abstainingPublicResult = buildPublicAnalysisResult(
     "job-abstain-test",
@@ -1389,6 +1399,11 @@ async function main() {
     },
     "public analysis response should explain why abstained answers were limited"
   );
+  assert.equal(
+    abstainingPublicResult.legal_analysis?.answer_disposition,
+    "handoff_recommended",
+    "public analysis response should mark abstained answers as handoff-recommended"
+  );
 
   const highRiskStored = buildStoredAnalysisResult({
     meta: {
@@ -1452,6 +1467,11 @@ async function main() {
       ]
     },
     "stored analysis payload should preserve high-risk handoff guidance without leaking raw escalation internals"
+  );
+  assert.equal(
+    highRiskStored.legal_analysis?.answer_disposition,
+    "safety_first_handoff",
+    "stored analysis payload should mark high-risk escalation as safety-first handoff"
   );
   assert.equal(
     "high_risk_escalation" in (highRiskStored.legal_analysis ?? {}),
@@ -1525,6 +1545,11 @@ async function main() {
       ]
     },
     "public analysis response should preserve high-risk handoff guidance without leaking raw escalation internals"
+  );
+  assert.equal(
+    highRiskPublic.legal_analysis?.answer_disposition,
+    "safety_first_handoff",
+    "public analysis response should mark high-risk escalation as safety-first handoff"
   );
   assert.equal(
     "high_risk_escalation" in (highRiskPublic.legal_analysis ?? {}),
@@ -1692,6 +1717,11 @@ async function main() {
       ]
     },
     "public analysis should preserve mixed-scope handoff guidance while keeping supported issue output"
+  );
+  assert.equal(
+    mixedScopePublic.legal_analysis?.answer_disposition,
+    "handoff_recommended",
+    "public analysis should mark mixed-scope handoff cases with handoff answer disposition"
   );
   assert.ok(
     mixedScopePublic.legal_analysis?.safety_gate?.blocked_reasons?.includes("unsupported_issue_present"),
