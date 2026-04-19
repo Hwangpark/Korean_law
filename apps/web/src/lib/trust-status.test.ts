@@ -96,9 +96,39 @@ assertEqual(
 );
 assertEqual(
   getAuthoritySignal({
+    answerDisposition: 'handoff_recommended',
+    uncertaintyReasons: ['보강 필요'],
+    evidenceSufficient: false,
+  }).label,
+  '전문가 인계 필요',
+  'authority should prefer handoff disposition over limited signals',
+);
+assertEqual(
+  getAuthoritySignal({
+    answerDisposition: 'limited_answer',
+    handoffRecommended: true,
+    abstainReasons: ['추가 사실 필요'],
+    uncertaintyReasons: ['보강 필요'],
+  }).label,
+  '전문가 인계 필요',
+  'authority should still escalate when explicit handoff signals exist alongside limited disposition',
+);
+assertEqual(
+  getAuthoritySignal({
     answerDisposition: 'safety_first_handoff',
+    handoffRecommended: true,
+    abstainReasons: ['상대방 신원 확인 필요'],
     uncertaintyReasons: ['긴급 대응 필요'],
   }).label,
   '안전 우선 인계',
   'authority safety-first label',
+);
+assertEqual(
+  getAuthoritySignal({
+    answerDisposition: 'safety_first_handoff',
+    handoffRecommended: true,
+    uncertaintyReasons: ['긴급 대응 필요'],
+  }).headline,
+  '법률 판단보다 안전 확보와 전문가 연결을 먼저 봐야 하는 상태입니다.',
+  'authority should preserve safety-first headline when generic handoff signals also exist',
 );
